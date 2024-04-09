@@ -73,7 +73,7 @@ class LatticeGraph(Data):
         Q = calculate_transform_matrix(self.lattice_constants)
         if hasattr(self, 'batch') and self.batch is not None:
             Q = torch.take_along_dim(Q, self.batch.view(-1,1,1), 0)
-            # Q[p,i,j] and pos[p,j]
+            # Q[p,i,j] and red_pos[p,j] -> pos[p,i]
         return torch.einsum('...ij,...j->...i', Q, self.red_pos)
 
 class GLAMM_Dataset(InMemoryDataset):
