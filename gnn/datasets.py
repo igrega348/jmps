@@ -69,12 +69,36 @@ class LatticeGraph(Data):
         super().__init__(*args, **kwargs)
 
     @property
-    def pos(self):
+    def transform_matrix(self) -> torch.Tensor:
+        return calculate_transform_matrix(self.lattice_constants)
+
+    @property
+    def pos(self) -> torch.Tensor:
         Q = calculate_transform_matrix(self.lattice_constants)
         if hasattr(self, 'batch') and self.batch is not None:
             Q = torch.take_along_dim(Q, self.batch.view(-1,1,1), 0)
             # Q[p,i,j] and red_pos[p,j] -> pos[p,i]
         return torch.einsum('...ij,...j->...i', Q, self.red_pos)
+
+    @property
+    def transformed_edge_shifts(self) -> torch.Tensor:
+        Q = calculate_transform_matrix(self.lattice_constants)
+        edge_index = self.edge_index
+        sender, _ = edge_index
+
+        num_edges = edge_index.shape[-1]
+        shifts = self.unit_shifts.new_zeros(num_edges, 3, dtype=torch.float)
+        nonzero_mask = torch.any(self.unit_shifts, dim=-1)
+        nonzero_inds = sender[nonzero_mask]
+        if (not hasattr(self, 'batch')) or self.batch is None:
+            pass # Q = Q
+        else:
+            batch = self.batch        
+            batch_map = batch[nonzero_inds]
+            Q = torch.take_along_dim(Q, batch_map.view(-1,1,1), 0)
+
+        shifts[nonzero_mask] = torch.einsum('...ij,...j->...i', Q, self.unit_shifts[nonzero_mask])
+        return shifts
 
 class GLAMM_Dataset(InMemoryDataset):
     r"""Lattice dataset.
@@ -213,7 +237,7 @@ class GLAMM_Dataset(InMemoryDataset):
             tessellation_vecs = fundamental_tess_vecs
         else:
             raise ValueError(f'Fundamental tessellation vectors shape {fundamental_tess_vecs.shape} not recognised')
-        unit_shifts = tessellation_vecs.astype(int)
+        unit_shifts = tessellation_vecs
 
         # data for strut thickness calibration
         edge_vecs = red_nod_pos[edge_adjacency[:,1]] - red_nod_pos[edge_adjacency[:,0]]
@@ -230,7 +254,7 @@ class GLAMM_Dataset(InMemoryDataset):
         
         # features common for all relative densities
         _nodal_ft = torch.ones((num_uq_nodes,1), dtype=torch.float)
-        _unit_shifts = torch.tensor(unit_shifts, dtype=torch.long)
+        _unit_shifts = torch.tensor(unit_shifts, dtype=torch.float)
         _edge_adj = torch.tensor(edge_adjacency.T, dtype=torch.long)
         _reduced_nodal_positions = torch.tensor(red_nod_pos, dtype=torch.float)
         _lattice_constants = torch.from_numpy(lattice_constants).float().unsqueeze(0)

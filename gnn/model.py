@@ -138,15 +138,22 @@ class PositiveLiteGNN(torch.nn.Module):
         
         edge_index = batch.edge_index
         node_ft = batch.node_attrs
+        shifts = batch.transformed_edge_shifts
 
+        edge_radii = batch.edge_attr
         node_ft = self.node_ft_embedding(node_ft)
         vectors, lengths = get_edge_vectors_and_lengths(
-            positions=batch.positions, edge_index=edge_index, shifts=batch.shifts
+            positions=batch.pos, edge_index=edge_index, shifts=shifts
         )
+        # manual bidirectional edges
+        vectors = torch.cat((vectors, -vectors), dim=0)
+        lengths = torch.cat((lengths, lengths), dim=0)
+        edge_index = torch.cat((edge_index, torch.flip(edge_index, [0])), dim=1)
+        edge_radii = torch.cat((edge_radii, edge_radii), dim=0)
+
         edge_length_embedding = soft_one_hot_linspace(
             lengths.squeeze(-1), start=0, end=0.6, number=self.number_of_edge_basis, basis='gaussian', cutoff=False
         )
-        edge_radii = batch.edge_attr
         edge_radius_embedding = soft_one_hot_linspace(
             edge_radii.squeeze(-1), 0, self.max_edge_radius, self.number_of_edge_basis, 'gaussian', False
         )
