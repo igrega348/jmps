@@ -80,7 +80,7 @@ class GLAMM_Dataset(InMemoryDataset):
             edge_ft: str = 'r',
             graph_ft_format: str = 'cartesian_4',
             n_reldens: int = 1,
-            choose_reldens: str = 'first',
+            choose_reldens: str = 'all',
             multiprocessing: Optional[Union[bool, int]] = False,
             regex_filter: Optional[str] = None,
             #
