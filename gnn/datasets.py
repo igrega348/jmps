@@ -64,9 +64,27 @@ def test_calculate_transform_matrix():
     Q_np = Lattice.calculate_transform_matrix(r)
     assert np.allclose(Q_torch.numpy(), Q_np), f'Q_torch {Q_torch} not close to Q_np {Q_np}'
 
+class LatticeGraph(Data):
+    def __init__(self,*args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    @property
+    def pos(self):
+        Q = calculate_transform_matrix(self.lattice_constants)
+        if hasattr(self, 'batch') and self.batch is not None:
+            Q = torch.take_along_dim(Q, self.batch.view(-1,1,1), 0)
+            # Q[p,i,j] and pos[p,j]
+        return torch.einsum('...ij,...j->...i', Q, self.red_pos)
+
 class GLAMM_Dataset(InMemoryDataset):
     r"""Lattice dataset.
     Work in progress.
+
+    Notable changes from the original GLAMM_Dataset:
+    - reduced nodal positions by default
+    - no reverse edges by default (reduce memory footprint)
+    - only enable strut radius as edge feature
+
 
     """  # noqa: E501
 
@@ -165,9 +183,9 @@ class GLAMM_Dataset(InMemoryDataset):
         ):
         name = lat_data['name']
         if 'nodal_positions' in lat_data:
-            nodal_positions = np.atleast_2d(lat_data['nodal_positions'])
+            red_nod_pos = np.atleast_2d(lat_data['nodal_positions'])
         elif 'reduced_node_coordinates' in lat_data:
-            nodal_positions = np.atleast_2d(lat_data['reduced_node_coordinates'])
+            red_nod_pos = np.atleast_2d(lat_data['reduced_node_coordinates'])
         else:
             raise ValueError('No nodal positions found')
         fundamental_edge_adjacency = np.atleast_2d(lat_data['fundamental_edge_adjacency'])
@@ -187,7 +205,7 @@ class GLAMM_Dataset(InMemoryDataset):
             compliance_tensors = compliance_tensors_M
 
         uq_inds = np.unique(fundamental_edge_adjacency)
-        nodal_positions = nodal_positions[uq_inds]
+        red_nod_pos = red_nod_pos[uq_inds]
         edge_adjacency = np.searchsorted(uq_inds, fundamental_edge_adjacency)
         if fundamental_tess_vecs.shape[1]==6:
             tessellation_vecs = fundamental_tess_vecs[:, 3:] - fundamental_tess_vecs[:, :3]
@@ -197,35 +215,24 @@ class GLAMM_Dataset(InMemoryDataset):
             raise ValueError(f'Fundamental tessellation vectors shape {fundamental_tess_vecs.shape} not recognised')
         unit_shifts = tessellation_vecs.astype(int)
 
-        # transform coordinates
-        Q = Lattice.calculate_transform_matrix(lattice_constants)
-        nodal_positions = nodal_positions@(Q.T)
-        tessellation_vecs = tessellation_vecs@(Q.T)
-
-        edge_adjacency = np.row_stack(
-            (edge_adjacency, edge_adjacency[:,::-1])
-            ) # reverse connections
-        unit_shifts = np.row_stack(
-            (unit_shifts, -unit_shifts)
-        )
-        tessellation_vecs = np.row_stack(
-            (tessellation_vecs, -tessellation_vecs)
-        )
-
         # data for strut thickness calibration
-        edge_vecs = nodal_positions[edge_adjacency[:,1]] - nodal_positions[edge_adjacency[:,0]]
+        edge_vecs = red_nod_pos[edge_adjacency[:,1]] - red_nod_pos[edge_adjacency[:,0]]
         edge_vecs += tessellation_vecs
+        # transform to get real edge lengths
+        Q = Lattice.calculate_transform_matrix(lattice_constants)
+        edge_vecs = edge_vecs@(Q.T)
         edge_lengths = np.linalg.norm(edge_vecs, axis=1)
+        sum_edge_lengths = edge_lengths.sum()
         uc_vol = Lattice.calculate_UC_volume(lattice_constants)
+        del edge_vecs, edge_lengths
 
         num_uq_nodes = len(np.unique(edge_adjacency))
         
         # features common for all relative densities
         _nodal_ft = torch.ones((num_uq_nodes,1), dtype=torch.float)
-        _shifts = torch.tensor(tessellation_vecs, dtype=torch.float)
         _unit_shifts = torch.tensor(unit_shifts, dtype=torch.long)
         _edge_adj = torch.tensor(edge_adjacency.T, dtype=torch.long)
-        _nodal_pos = torch.tensor(nodal_positions, dtype=torch.float)
+        _reduced_nodal_positions = torch.tensor(red_nod_pos, dtype=torch.float)
         _lattice_constants = torch.from_numpy(lattice_constants).float().unsqueeze(0)
 
         out_list = []
@@ -239,10 +246,8 @@ class GLAMM_Dataset(InMemoryDataset):
                 _rel_dens = _fund_rel_dens[np.argmin(np.abs(_fund_rel_dens-rel_dens))]
                 assert np.abs(_rel_dens-rel_dens)<1e-4, f'Closest relative density {_rel_dens} is not close enough to {rel_dens}'
                 edge_radii = np.array(lat_data['fundamental_edge_radii'][_rel_dens]).reshape(-1,1)
-                edge_radii = np.concatenate((edge_radii, edge_radii), axis=0)
                 assert edge_radii.shape[0]==edge_adjacency.shape[0], f'Edge radii shape {edge_radii.shape} does not match edge adjacency shape {edge_adjacency.shape}'
             else:
-                sum_edge_lengths = edge_lengths.sum()
                 edge_rad = np.sqrt(rel_dens*uc_vol/(sum_edge_lengths * np.pi))
                 edge_radii = edge_rad*np.ones(edge_adjacency.shape[0])
 
@@ -269,40 +274,21 @@ class GLAMM_Dataset(InMemoryDataset):
             edge_ft_list = []
             edge_ft_list_rev = []
             for key in edge_ft_format.split(','):
-                if key=='L':
-                    edge_ft_list.append(edge_lengths)
-                    edge_ft_list_rev.append(edge_lengths)
-                elif key=='r':
+                if key=='r':
                     edge_ft_list.append(edge_radii)
                     edge_ft_list_rev.append(edge_radii)
-                elif key=='e_vec':
-                    edge_unit_vecs = edge_vecs/edge_lengths.reshape(-1,1)
-                    edge_ft_list.append(edge_unit_vecs)
-                    edge_ft_list_rev.append(-edge_unit_vecs)
-                elif key=='euler':
-                    v = edge_vecs/edge_lengths.reshape(-1,1)
-                    _phi = np.arccos(v[:,2])
-                    _th = np.arctan2(v[:,1],v[:,0])+np.pi
-                    edge_ft_list.append(np.column_stack(_phi, _th))
-                    v = -edge_vecs/edge_lengths.reshape(-1,1)
-                    _phi = np.arccos(v[:,2])
-                    _th = np.arctan2(v[:,1],v[:,0])+np.pi
-                    edge_ft_list_rev.append(np.column_stack(_phi, _th))
-                else:
-                    raise ValueError(f'Unrecognised edge format string `{key}`')
 
             edge_features = np.column_stack(edge_ft_list)
 
             # convert to torch tensors
             _edge_ft = torch.tensor(edge_features, dtype=torch.float)
             
-            data = Data(
+            data = LatticeGraph(
                 # common for all reldens
                 name=name,
-                positions=_nodal_pos,
+                red_pos=_reduced_nodal_positions,
                 node_attrs=_nodal_ft, 
                 edge_index=_edge_adj, 
-                shifts=_shifts,
                 unit_shifts=_unit_shifts,
                 lattice_constants=_lattice_constants,
                 # for this reldens
