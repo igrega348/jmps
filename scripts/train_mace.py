@@ -2,9 +2,9 @@
 import os
 import sys
 from pathlib import Path
-folder = Path(__file__).parents[1]
-if str(folder) not in sys.path:
-    sys.path.insert(0, str(folder))
+par_folder = Path(__file__).absolute().parents[1]
+if str(par_folder) not in sys.path:
+    sys.path.insert(0, str(par_folder))
 from argparse import Namespace
 import json
 import time
@@ -138,7 +138,7 @@ def main():
         message_passes=2,
         positive_function='matrix_power_2',
         # dataset
-        which='10imp',
+        dset_parent=str(par_folder/'dset'),
         # training
         # num_hp_trial=num_hp_trial,
         batch_size=16,
@@ -156,31 +156,31 @@ def main():
 
     # run_name = os.environ['SLURM_JOB_ID']
     run_name = '0'
-    log_dir = Path(f'./{run_name}')
+    log_dir = par_folder/f'experiments/{run_name}'
     while log_dir.is_dir():
         run_name = str(int(run_name)+1)
-        log_dir = Path(f'./{run_name}')
+        log_dir = par_folder/f'experiments/{run_name}'
     log_dir.mkdir()
     rank_zero_info(log_dir)
     params.log_dir = str(log_dir)
 
     ############# setup data ##############
-    train_dset = load_datasets(parent='./', tag='test', reldens_norm=False)
-    valid_dset = load_datasets(parent='./', tag='test', reldens_norm=False)
+    train_dset = load_datasets(parent=params.dset_parent, tag='test', reldens_norm=False)
+    valid_dset = load_datasets(parent=params.dset_parent, tag='test', reldens_norm=False)
 
     # randomize the order of the dataset into loader
     train_loader = DataLoader(
         dataset=train_dset, 
         batch_size=params.batch_size,
         shuffle=True,
-        # num_workers=params.num_workers,
+        num_workers=params.num_workers,
     )
 
     valid_loader = DataLoader(
         dataset=valid_dset,
         batch_size=params.valid_batch_size,
         shuffle=False,
-        # num_workers=params.num_workers,
+        num_workers=params.num_workers,
     )
 
     ############# setup model ##############
@@ -196,7 +196,7 @@ def main():
         EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
     # max_time = '00:01:27:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:45:00'
-    max_time = '00:00:10:00'
+    max_time = '00:01:00:00'
     trainer = pl.Trainer(
         accelerator='auto',
         accumulate_grad_batches=4, # effective batch size 256
@@ -204,12 +204,14 @@ def main():
         default_root_dir=params.log_dir,
         logger=wandb_logger,
         # enable_progress_bar=False,
+        overfit_batches=0.1,
         callbacks=callbacks,
         max_steps=50000,
         max_time=max_time,
         # val_check_interval=1000,
         log_every_n_steps=params.log_every_n_steps,
         check_val_every_n_epoch=1,
+        # limit_val_batches=0.1
     )
 
     ############# save params ##############
@@ -222,7 +224,7 @@ def main():
 
     ############# run testing ##############
     rank_zero_info('Testing')
-    train_dset = load_datasets(which='1imp', tag='train', reldens_norm=False)
+    train_dset = load_datasets(parent=params.dset_parent, tag='test', reldens_norm=False)
     train_loader = DataLoader(
         dataset=train_dset, batch_size=params.valid_batch_size, 
         shuffle=False,)
@@ -230,7 +232,7 @@ def main():
         dataset=valid_dset, batch_size=params.valid_batch_size,
         shuffle=False,
     )
-    test_dset = load_datasets(parent='./', tag='test', reldens_norm=False)
+    test_dset = load_datasets(parent=params.dset_parent, tag='test', reldens_norm=False)
     test_loader = DataLoader(
         dataset=test_dset, batch_size=params.valid_batch_size, 
         shuffle=False, 
