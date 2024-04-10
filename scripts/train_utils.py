@@ -109,29 +109,26 @@ def aggr_errors(df_errors):
     
     return params
 
-def load_datasets(tag: str, which: str = '0imp', parent: str = '../../datasets', reldens_norm: bool = False, rotate: bool = True):
-    assert which in ['0imp_quarter', '0imp_half', '0imp', '1imp', '2imp', '4imp', '10imp']
+def load_datasets(tag: str, parent: str = '../../datasets', reldens_norm: bool = False, rotate: bool = True):
     if tag == 'test':
-        root = os.path.join(parent, which)
-        dset_file = 'test_cat.lat'
+        dset_file = 'test.lat'
         processed_fname = 'test.pt'
     elif tag == 'train':
-        root = os.path.join(parent, which)
-        dset_file = 'training_cat.lat'
+        dset_file = 'train.lat'
         processed_fname = 'train.pt'
     elif tag == 'valid':
-        root = os.path.join(parent, which)
-        dset_file = 'validation_cat.lat'
+        dset_file = 'val.lat'
         processed_fname = 'validation.pt'
+    root = parent
     rank_zero_info(f'Loading dataset {tag} from {root}')
     dset = GLAMM_Dataset(
         root=root,
         catalogue_path=os.path.join(root, 'raw', dset_file),
-        transform=RotateLat(rotate=rotate),
+        # transform=RotateLat(rotate=rotate),
         dset_fname=processed_fname,
         n_reldens=3,
-        choose_reldens='first', # changing last to first -- low relative densities to capture more of stretching-bending transition
-        graph_ft_format='cartesian_4',
+        choose_reldens='all',
+        graph_ft_format='Mandel', # no rotation and Mandel format
     )
     rank_zero_info(dset)
 

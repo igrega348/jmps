@@ -69,7 +69,6 @@ class LightningWrappedModel(pl.LightningModule):
         stiffness_loss_mean = stiffness_loss.mean()
 
         loss = stiffness_loss
-        assert not self.params.use_dir_loss
         loss = 100*(loss / mean_stiffness).mean() # [1]
     
         self.log('loss', loss, batch_size=batch.num_graphs, logger=True)
@@ -115,37 +114,38 @@ class LightningWrappedModel(pl.LightningModule):
             rank_zero_info('Loss is NaN. Stopping training')
 
 def main():
-    df = pd.read_csv('./mace-hparams-216.csv', index_col=0)
-    num_hp_trial = int(os.environ['NUM_HP_TRIAL'])
+    # df = pd.read_csv('./mace-hparams-216.csv', index_col=0)
+    # num_hp_trial = int(os.environ['NUM_HP_TRIAL'])
+    num_hp_trial = 0
 
-    desc = "Exp-217. Stiffness training with normalization. MACE+ve. 10imp. Increase edge bases to 16"
+    desc = "Exp-0. First trial"
     rank_zero_info(desc)
-    seed_everything(num_hp_trial, workers=True)
+    seed_everything(0, workers=True)
 
     params = Namespace(
         # network
         lmax=4,
-        hidden_irreps='+'.join([f'{df.loc[num_hp_trial, "hidden_irreps"]}x{i}e' if i%2==0 else f'{df.loc[num_hp_trial, "hidden_irreps"]}x{i}o' for i in range(0,5)]),
-        readout_irreps='+'.join([f'{df.loc[num_hp_trial, "readout_irreps"]}x{i}e' if i%2==0 else f'{df.loc[num_hp_trial, "readout_irreps"]}x{i}o' for i in range(0,5)]),
-        num_edge_bases=int(df.loc[num_hp_trial, 'num_edge_bases']),
+        hidden_irreps='+'.join([f'16x{i}e' if i%2==0 else f'16x{i}o' for i in range(0,5)]),
+        readout_irreps='+'.join([f'8x{i}e' if i%2==0 else f'8x{i}o' for i in range(0,5)]),
+        num_edge_bases=10,
+        max_edge_radius=0.018,
         interaction_reduction='sum',
-        interaction_bias=True,
         agg_norm_const=4.0,
         inter_MLP_dim=64,
         inter_MLP_layers=3,
         correlation=3,
         global_reduction='mean',
-        message_passes=int(df.loc[num_hp_trial, 'message_passes']),
+        message_passes=2,
+        positive_function='matrix_power_2',
         # dataset
         which='10imp',
         # training
-        use_dir_loss=df.loc[num_hp_trial, 'use_dir_loss'],
-        num_hp_trial=num_hp_trial,
-        batch_size=64,
+        # num_hp_trial=num_hp_trial,
+        batch_size=16,
         valid_batch_size=64,
-        log_every_n_steps=25,
+        log_every_n_steps=1,
         optimizer='adamw',
-        lr=df.loc[num_hp_trial, 'lr'], 
+        lr=1e-3, 
         amsgrad=True,
         weight_decay=1e-8,
         beta1=0.9,
@@ -154,7 +154,8 @@ def main():
     )
     params.desc = desc
 
-    run_name = os.environ['SLURM_JOB_ID']
+    # run_name = os.environ['SLURM_JOB_ID']
+    run_name = '0'
     log_dir = Path(f'./{run_name}')
     while log_dir.is_dir():
         run_name = str(int(run_name)+1)
@@ -164,57 +165,55 @@ def main():
     params.log_dir = str(log_dir)
 
     ############# setup data ##############
-    train_dset = load_datasets(which=params.which, tag='train', reldens_norm=True)
-    valid_dset = load_datasets(which='0imp', tag='valid', reldens_norm=True)
+    train_dset = load_datasets(parent='./', tag='test', reldens_norm=False)
+    valid_dset = load_datasets(parent='./', tag='test', reldens_norm=False)
 
-    max_edge_radius = train_dset.data.edge_attr.max().item()
-    params.max_edge_radius = max_edge_radius
     # randomize the order of the dataset into loader
     train_loader = DataLoader(
         dataset=train_dset, 
         batch_size=params.batch_size,
         shuffle=True,
-        num_workers=params.num_workers,
+        # num_workers=params.num_workers,
     )
 
     valid_loader = DataLoader(
         dataset=valid_dset,
         batch_size=params.valid_batch_size,
         shuffle=False,
-        num_workers=params.num_workers,
+        # num_workers=params.num_workers,
     )
 
     ############# setup model ##############
     lightning_model = LightningWrappedModel(PositiveLiteGNN, params)
 
     ############# setup trainer ##############
-    wandb_logger = WandbLogger(project="glamm-gnn-fresh", entity="ivan-grega", save_dir=params.log_dir, 
-                               tags=['exp-217', 'stiffness', 'mace+ve'])
+    wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=params.log_dir, 
+                               tags=['exp-0'])
     callbacks = [
         ModelSummary(max_depth=3),
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.3f}', every_n_epochs=1, monitor='val_loss', save_top_k=1),
-        PrintTableMetrics(['epoch','step','loss','val_loss'], every_n_steps=100000),
+        # PrintTableMetrics(['epoch','step','loss','val_loss'], every_n_steps=100000),
         EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
-    max_time = '00:01:27:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:45:00'
+    # max_time = '00:01:27:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:45:00'
+    max_time = '00:00:10:00'
     trainer = pl.Trainer(
         accelerator='auto',
         accumulate_grad_batches=4, # effective batch size 256
         gradient_clip_val=10.0,
         default_root_dir=params.log_dir,
         logger=wandb_logger,
-        enable_progress_bar=False,
+        # enable_progress_bar=False,
         callbacks=callbacks,
         max_steps=50000,
         max_time=max_time,
-        val_check_interval=100,
+        # val_check_interval=1000,
         log_every_n_steps=params.log_every_n_steps,
-        check_val_every_n_epoch=None,
+        check_val_every_n_epoch=1,
     )
 
     ############# save params ##############
     if trainer.is_global_zero:
-        params.use_dir_loss = bool(params.use_dir_loss)
         params_path = log_dir/f'params-{num_hp_trial}.json'
         params_path.write_text(json.dumps(vars(params), indent=2))
 
@@ -223,7 +222,7 @@ def main():
 
     ############# run testing ##############
     rank_zero_info('Testing')
-    train_dset = load_datasets(which='1imp', tag='train', reldens_norm=True)
+    train_dset = load_datasets(which='1imp', tag='train', reldens_norm=False)
     train_loader = DataLoader(
         dataset=train_dset, batch_size=params.valid_batch_size, 
         shuffle=False,)
@@ -231,7 +230,7 @@ def main():
         dataset=valid_dset, batch_size=params.valid_batch_size,
         shuffle=False,
     )
-    test_dset = load_datasets(which='0imp', tag='test', reldens_norm=True)
+    test_dset = load_datasets(parent='./', tag='test', reldens_norm=False)
     test_loader = DataLoader(
         dataset=test_dset, batch_size=params.valid_batch_size, 
         shuffle=False, 
