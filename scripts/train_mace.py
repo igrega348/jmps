@@ -143,7 +143,7 @@ def main():
         # num_hp_trial=num_hp_trial,
         batch_size=16,
         valid_batch_size=64,
-        log_every_n_steps=1,
+        log_every_n_steps=100,
         optimizer='adamw',
         lr=1e-3, 
         amsgrad=True,
@@ -160,7 +160,7 @@ def main():
     while log_dir.is_dir():
         run_name = str(int(run_name)+1)
         log_dir = par_folder/f'experiments/{run_name}'
-    log_dir.mkdir()
+    log_dir.mkdir(parents=True)
     rank_zero_info(log_dir)
     params.log_dir = str(log_dir)
 
@@ -192,7 +192,7 @@ def main():
     callbacks = [
         ModelSummary(max_depth=3),
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.3f}', every_n_epochs=1, monitor='val_loss', save_top_k=1),
-        # PrintTableMetrics(['epoch','step','loss','val_loss'], every_n_steps=100000),
+        PrintTableMetrics(['epoch','step','loss','val_loss'], every_n_steps=100),
         EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
     # max_time = '00:01:27:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:45:00'
@@ -203,7 +203,7 @@ def main():
         gradient_clip_val=10.0,
         default_root_dir=params.log_dir,
         logger=wandb_logger,
-        # enable_progress_bar=False,
+        enable_progress_bar=False,
         overfit_batches=0.1,
         callbacks=callbacks,
         max_steps=50000,

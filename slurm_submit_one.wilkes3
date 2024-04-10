@@ -5,9 +5,9 @@
 #SBATCH -A DESHPANDE-SL2-GPU
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=24:00:00
+#SBATCH --time=01:30:00
 #SBATCH --mail-type=ALL
-#SBATCH --output=./slurm_logs/slurm-%j.log
+##SBATCH --output=./slurm_logs/slurm-%j.log
 
 #! Uncomment this to prevent the job from being requeued (e.g. if
 #! interrupted by node failure or system downtime):
@@ -43,7 +43,8 @@ source /usr/local/software/master/miniconda/3/bin/activate ~/graphgym-env/
 
 
 #! Work directory (i.e. where the job will run):
-workdir=$(realpath `pwd`)
+# workdir=$(realpath `pwd`)
+workdir=$(realpath scripts)
 
 #! Are you using OpenMP (NB this is unrelated to OpenMPI)? If so increase this
 #! safe value to no more than 128:
@@ -52,7 +53,7 @@ export OMP_NUM_THREADS=1
 #! Number of MPI tasks to be started by the application per node and in total (do not change):
 np=$[${numnodes}*${mpi_tasks_per_node}]
 
-CMD="python train_lite_positive.py"
+CMD="python train_mace.py"
 
 
 cd $workdir
