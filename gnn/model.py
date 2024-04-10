@@ -113,9 +113,10 @@ class GNN_Head(torch.nn.Module):
 
 
 class PositiveLiteGNN(torch.nn.Module):
-    def __init__(self, params: Namespace, *args: Any, **kwargs: Any) -> "PositiveLiteGNN":
+    def __init__(self, cfg: "CfgDict", *args: Any, **kwargs: Any) -> "PositiveLiteGNN":
         super().__init__(*args, **kwargs)
 
+        params = cfg.model
         self.params = params
         hidden_irreps = o3.Irreps(params.hidden_irreps)
 

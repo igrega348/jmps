@@ -19,6 +19,18 @@ from e3nn import o3
 from gnn import GLAMM_Dataset
 from lattices.lattices import elasticity_func
 # %%
+class CfgDict(dict):
+    """dot.notation access to dictionary attributes"""
+    # based on https://stackoverflow.com/questions/2352181/how-to-use-a-dot-to-access-members-of-dictionary
+    # but allowing for implicit nesting
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
+    def __getattr__(self, key):
+        val = self.get(key)
+        if isinstance(val, dict):
+            return CfgDict(val)
+        return val
+    
 class RotateLat:
     def __init__(self, rotate=True):
         self.rotate = rotate

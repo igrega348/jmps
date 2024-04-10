@@ -7,6 +7,7 @@ if str(par_folder) not in sys.path:
     sys.path.insert(0, str(par_folder))
 from argparse import Namespace
 import json
+import yaml
 import time
 from typing import Any, Tuple, Optional
 from pathlib import Path
@@ -33,22 +34,19 @@ from e3nn import o3
 from gnn import PositiveLiteGNN
 from gnn import GLAMM_Dataset
 from gnn.callbacks import PrintTableMetrics
-from train_utils import load_datasets, obtain_errors, aggr_errors
+from train_utils import load_datasets, obtain_errors, aggr_errors, CfgDict
 # %%
 class LightningWrappedModel(pl.LightningModule):
     _time_metrics = {}
     
-    def __init__(self, model: torch.nn.Module, params: Namespace, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, model: torch.nn.Module, cfg: CfgDict, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        if isinstance(params, dict):
-            params = Namespace(**params)
-        self.params = params
-        self.model = model(params)
-       
-        self.save_hyperparameters(params)
+        self.cfg = cfg
+        self.model = model(cfg) # initialize model
+        self.save_hyperparameters(cfg)
 
     def configure_optimizers(self):
-        params = self.params
+        params = self.cfg.training
         optim = torch.optim.AdamW(params=self.model.parameters(), lr=params.lr, 
             betas=(params.beta1,0.999), eps=params.epsilon,
             amsgrad=params.amsgrad, weight_decay=params.weight_decay,)
@@ -122,37 +120,40 @@ def main():
     rank_zero_info(desc)
     seed_everything(0, workers=True)
 
-    params = Namespace(
-        # network
-        lmax=4,
-        hidden_irreps='+'.join([f'16x{i}e' if i%2==0 else f'16x{i}o' for i in range(0,5)]),
-        readout_irreps='+'.join([f'8x{i}e' if i%2==0 else f'8x{i}o' for i in range(0,5)]),
-        num_edge_bases=10,
-        max_edge_radius=0.018,
-        interaction_reduction='sum',
-        agg_norm_const=4.0,
-        inter_MLP_dim=64,
-        inter_MLP_layers=3,
-        correlation=3,
-        global_reduction='mean',
-        message_passes=2,
-        positive_function='matrix_power_2',
-        # dataset
-        dset_parent=str(par_folder/'dset'),
-        # training
-        # num_hp_trial=num_hp_trial,
-        batch_size=16,
-        valid_batch_size=64,
-        log_every_n_steps=100,
-        optimizer='adamw',
-        lr=1e-3, 
-        amsgrad=True,
-        weight_decay=1e-8,
-        beta1=0.9,
-        epsilon=1e-8,
-        num_workers=4,
-    )
-    params.desc = desc
+    cfg = {
+        'desc':desc,
+        'model':{
+            'hidden_irreps':'16x0e+16x1o+16x2e+16x3o+16x4e',
+            'readout_irreps':'8x0e+8x1o+8x2e+8x3o+8x4e',
+            'num_edge_bases':10,
+            'max_edge_radius':0.018,
+            'lmax':4,
+            'message_passes':2,
+            'agg_norm_const':4.0,
+            'interaction_reduction':'sum',
+            'correlation':3,
+            'inter_MLP_dim':64,
+            'inter_MLP_layers':3,
+            'global_reduction':'mean',
+            'positive_function':'matrix_power_2',
+        },
+        'data':{
+            'dset_parent':str(par_folder/'dset'),
+        },
+        'training':{
+            'batch_size':16,
+            'valid_batch_size':64,
+            'log_every_n_steps':100,
+            'optimizer':'adamw',
+            'lr':1e-3, 
+            'amsgrad':True,
+            'weight_decay':1e-8,
+            'beta1':0.9,
+            'epsilon':1e-8,
+            'num_workers':4,
+        }
+    }
+    cfg = CfgDict(cfg)
 
     # run_name = os.environ['SLURM_JOB_ID']
     run_name = '0'
@@ -162,32 +163,32 @@ def main():
         log_dir = par_folder/f'experiments/{run_name}'
     log_dir.mkdir(parents=True)
     rank_zero_info(log_dir)
-    params.log_dir = str(log_dir)
+    cfg.log_dir = str(log_dir)
 
     ############# setup data ##############
-    train_dset = load_datasets(parent=params.dset_parent, tag='test', reldens_norm=False)
-    valid_dset = load_datasets(parent=params.dset_parent, tag='test', reldens_norm=False)
+    train_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
+    valid_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
 
     # randomize the order of the dataset into loader
     train_loader = DataLoader(
         dataset=train_dset, 
-        batch_size=params.batch_size,
+        batch_size=cfg.training.batch_size,
         shuffle=True,
-        num_workers=params.num_workers,
+        num_workers=cfg.training.num_workers,
     )
 
     valid_loader = DataLoader(
         dataset=valid_dset,
-        batch_size=params.valid_batch_size,
+        batch_size=cfg.training.valid_batch_size,
         shuffle=False,
-        num_workers=params.num_workers,
+        num_workers=cfg.training.num_workers,
     )
 
     ############# setup model ##############
-    lightning_model = LightningWrappedModel(PositiveLiteGNN, params)
+    lightning_model = LightningWrappedModel(PositiveLiteGNN, cfg)
 
     ############# setup trainer ##############
-    wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=params.log_dir, 
+    wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
                                tags=['exp-0'])
     callbacks = [
         ModelSummary(max_depth=3),
@@ -201,7 +202,7 @@ def main():
         accelerator='auto',
         accumulate_grad_batches=4, # effective batch size 256
         gradient_clip_val=10.0,
-        default_root_dir=params.log_dir,
+        default_root_dir=cfg.log_dir,
         logger=wandb_logger,
         enable_progress_bar=False,
         overfit_batches=0.1,
@@ -209,7 +210,7 @@ def main():
         max_steps=50000,
         max_time=max_time,
         # val_check_interval=1000,
-        log_every_n_steps=params.log_every_n_steps,
+        log_every_n_steps=cfg.training.log_every_n_steps,
         check_val_every_n_epoch=1,
         # limit_val_batches=0.1
     )
@@ -217,24 +218,24 @@ def main():
     ############# save params ##############
     if trainer.is_global_zero:
         params_path = log_dir/f'params-{num_hp_trial}.json'
-        params_path.write_text(json.dumps(vars(params), indent=2))
+        params_path.write_text(yaml.dump(dict(cfg)))
 
     ############# run training ##############
     trainer.fit(lightning_model, train_loader, valid_loader)
 
     ############# run testing ##############
     rank_zero_info('Testing')
-    train_dset = load_datasets(parent=params.dset_parent, tag='test', reldens_norm=False)
+    train_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
     train_loader = DataLoader(
-        dataset=train_dset, batch_size=params.valid_batch_size, 
+        dataset=train_dset, batch_size=cfg.training.valid_batch_size, 
         shuffle=False,)
     valid_loader = DataLoader(
-        dataset=valid_dset, batch_size=params.valid_batch_size,
+        dataset=valid_dset, batch_size=cfg.training.valid_batch_size,
         shuffle=False,
     )
-    test_dset = load_datasets(parent=params.dset_parent, tag='test', reldens_norm=False)
+    test_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
     test_loader = DataLoader(
-        dataset=test_dset, batch_size=params.valid_batch_size, 
+        dataset=test_dset, batch_size=cfg.training.valid_batch_size, 
         shuffle=False, 
     )
     train_results = trainer.predict(lightning_model, train_loader, return_predictions=True, ckpt_path='best')
