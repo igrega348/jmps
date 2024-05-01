@@ -156,7 +156,7 @@ def main():
     cfg = CfgDict(cfg)
 
     # run_name = os.environ['SLURM_JOB_ID']
-    run_name = '4'
+    run_name = '7'
     log_dir = par_folder/f'experiments/{run_name}'
     while log_dir.is_dir():
         run_name = str(int(run_name)+1)
@@ -197,7 +197,7 @@ def main():
         EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
     # max_time = '00:01:27:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:45:00'
-    max_time = '00:01:20:00'
+    max_time = '00:04:20:00'
     trainer = pl.Trainer(
         accelerator='auto',
         accumulate_grad_batches=4, # increase effective batch size
@@ -221,14 +221,14 @@ def main():
         params_path.write_text(yaml.dump(dict(cfg)))
 
     ############# run training ##############
-    trainer.fit(lightning_model, train_loader, valid_loader)
+    trainer.fit(lightning_model, train_loader, valid_loader, ckpt_path=par_folder/f'experiments/7/JMPS/3iusvdan/checkpoints/epoch=1-step=23606-val_loss=385.972.ckpt')
 
     ############# run testing ##############
     rank_zero_info('Testing')
-    train_dset = load_datasets(parent=cfg.data.dset_parent, tag='train', reldens_norm=False)
-    train_loader = DataLoader(
-        dataset=train_dset, batch_size=cfg.training.valid_batch_size, 
-        shuffle=False,)
+    # train_dset = load_datasets(parent=cfg.data.dset_parent, tag='train', reldens_norm=False)
+    # train_loader = DataLoader(
+        # dataset=train_dset, batch_size=cfg.training.valid_batch_size, 
+        # shuffle=False,)
     valid_loader = DataLoader(
         dataset=valid_dset, batch_size=cfg.training.valid_batch_size,
         shuffle=False,
@@ -238,10 +238,11 @@ def main():
         dataset=test_dset, batch_size=cfg.training.valid_batch_size, 
         shuffle=False, 
     )
-    train_results = trainer.predict(lightning_model, train_loader, return_predictions=True, ckpt_path='best')
+    # train_results = trainer.predict(lightning_model, train_loader, return_predictions=True, ckpt_path='best')
     valid_results = trainer.predict(lightning_model, valid_loader, return_predictions=True, ckpt_path='best')
     test_results = trainer.predict(lightning_model, test_loader, return_predictions=True, ckpt_path='best')
-    df_errors = pd.concat([obtain_errors(train_results, 'train'), obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
+    # df_errors = pd.concat([obtain_errors(train_results, 'train'), obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
+    df_errors = pd.concat([obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
     eval_params = aggr_errors(df_errors)
     pd.Series(eval_params, name=num_hp_trial).to_csv(log_dir/f'aggr_results-{num_hp_trial}-step={trainer.global_step}.csv')
  
