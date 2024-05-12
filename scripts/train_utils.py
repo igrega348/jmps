@@ -16,7 +16,7 @@ from torch_geometric.data import Data
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from e3nn import o3
 
-from gnn import GLAMM_Dataset
+from gnn import GLAMM_Dataset, LatticeGraph
 from lattices.lattices import elasticity_func
 # %%
 class CfgDict(dict):
@@ -39,28 +39,28 @@ class RotateLat:
         if self.rotate:
             if Q is None:
                 Q = o3.rand_matrix()
-            C = torch.einsum('...ijkl,ai,bj,ck,dl->...abcd', lat.stiffness, Q, Q, Q, Q)
-            S = torch.einsum('...ijkl,ai,bj,ck,dl->...abcd', lat.compliance, Q, Q, Q, Q)
-            pos = torch.einsum('ij,...j->...i', Q, lat.positions)
-            shifts = torch.einsum('ij,...j->...i', Q, lat.shifts)
+            R = elasticity_func.Mandel_rot_matrix_torch(Q)
+            C = torch.einsum('...ij,ai,bj->...ab', lat.stiffness, R, R)
+            S = torch.einsum('...ij,ai,bj->...ab', lat.compliance, R, R)
+            pos = torch.einsum('ij,...j->...i', Q, lat.red_pos)
+            shifts = torch.einsum('ij,...j->...i', Q, lat.unit_shifts)
         else:
             assert Q is None, 'Q should be None if instance initialized with rotate=False'
             C = lat.stiffness
             S = lat.compliance
-            pos = lat.positions
-            shifts = lat.shifts
+            pos = lat.res_pos
+            shifts = lat.unit_shifts
             
-        C_mand = elasticity_func.stiffness_cart_4_to_Mandel(C)
-        S_mand = elasticity_func.stiffness_cart_4_to_Mandel(S)
-        transformed = Data(
+        transformed = LatticeGraph(
+            lattice_constants=lat.lattice_constants,
             node_attrs=lat.node_attrs,
             edge_attr=lat.edge_attr,
             edge_index=lat.edge_index,
-            positions = pos,
-            shifts = shifts,
+            red_pos = pos,
+            unit_shifts = shifts,
             rel_dens=lat.rel_dens,
-            stiffness=C_mand,
-            compliance=S_mand,
+            stiffness=C,
+            compliance=S,
             name = lat.name
         )
         return transformed

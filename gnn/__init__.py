@@ -1,4 +1,4 @@
-from .datasets import GLAMM_Dataset 
+from .datasets import GLAMM_Dataset, LatticeGraph
 from .model import PositiveLiteGNN
 
 __all__ = [

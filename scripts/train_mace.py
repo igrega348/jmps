@@ -116,7 +116,7 @@ def main():
     # num_hp_trial = int(os.environ['NUM_HP_TRIAL'])
     num_hp_trial = 0
 
-    desc = "Exp-0. First trial"
+    desc = "Exp-1. Run all data. No rotation augmentation"
     rank_zero_info(desc)
     seed_everything(0, workers=True)
 
@@ -156,7 +156,7 @@ def main():
     cfg = CfgDict(cfg)
 
     # run_name = os.environ['SLURM_JOB_ID']
-    run_name = '0'
+    run_name = '7'
     log_dir = par_folder/f'experiments/{run_name}'
     while log_dir.is_dir():
         run_name = str(int(run_name)+1)
@@ -166,8 +166,8 @@ def main():
     cfg.log_dir = str(log_dir)
 
     ############# setup data ##############
-    train_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
-    valid_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
+    train_dset = load_datasets(parent=cfg.data.dset_parent, tag='train', reldens_norm=False)
+    valid_dset = load_datasets(parent=cfg.data.dset_parent, tag='valid', reldens_norm=False)
 
     # randomize the order of the dataset into loader
     train_loader = DataLoader(
@@ -189,7 +189,7 @@ def main():
 
     ############# setup trainer ##############
     wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
-                               tags=['exp-0'])
+                               tags=['exp-1'])
     callbacks = [
         ModelSummary(max_depth=3),
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.3f}', every_n_epochs=1, monitor='val_loss', save_top_k=1),
@@ -197,15 +197,15 @@ def main():
         EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
     # max_time = '00:01:27:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:45:00'
-    max_time = '00:01:00:00'
+    max_time = '00:04:20:00'
     trainer = pl.Trainer(
         accelerator='auto',
-        accumulate_grad_batches=4, # effective batch size 256
+        accumulate_grad_batches=4, # increase effective batch size
         gradient_clip_val=10.0,
         default_root_dir=cfg.log_dir,
         logger=wandb_logger,
         enable_progress_bar=False,
-        overfit_batches=0.1,
+        # overfit_batches=1,
         callbacks=callbacks,
         max_steps=50000,
         max_time=max_time,
@@ -217,18 +217,18 @@ def main():
 
     ############# save params ##############
     if trainer.is_global_zero:
-        params_path = log_dir/f'params-{num_hp_trial}.json'
+        params_path = log_dir/f'params-{num_hp_trial}.yml'
         params_path.write_text(yaml.dump(dict(cfg)))
 
     ############# run training ##############
-    trainer.fit(lightning_model, train_loader, valid_loader)
+    trainer.fit(lightning_model, train_loader, valid_loader, ckpt_path=par_folder/f'experiments/7/JMPS/3iusvdan/checkpoints/epoch=1-step=23606-val_loss=385.972.ckpt')
 
     ############# run testing ##############
     rank_zero_info('Testing')
-    train_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
-    train_loader = DataLoader(
-        dataset=train_dset, batch_size=cfg.training.valid_batch_size, 
-        shuffle=False,)
+    # train_dset = load_datasets(parent=cfg.data.dset_parent, tag='train', reldens_norm=False)
+    # train_loader = DataLoader(
+        # dataset=train_dset, batch_size=cfg.training.valid_batch_size, 
+        # shuffle=False,)
     valid_loader = DataLoader(
         dataset=valid_dset, batch_size=cfg.training.valid_batch_size,
         shuffle=False,
@@ -238,17 +238,18 @@ def main():
         dataset=test_dset, batch_size=cfg.training.valid_batch_size, 
         shuffle=False, 
     )
-    train_results = trainer.predict(lightning_model, train_loader, return_predictions=True, ckpt_path='best')
+    # train_results = trainer.predict(lightning_model, train_loader, return_predictions=True, ckpt_path='best')
     valid_results = trainer.predict(lightning_model, valid_loader, return_predictions=True, ckpt_path='best')
     test_results = trainer.predict(lightning_model, test_loader, return_predictions=True, ckpt_path='best')
-    df_errors = pd.concat([obtain_errors(train_results, 'train'), obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
+    # df_errors = pd.concat([obtain_errors(train_results, 'train'), obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
+    df_errors = pd.concat([obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
     eval_params = aggr_errors(df_errors)
     pd.Series(eval_params, name=num_hp_trial).to_csv(log_dir/f'aggr_results-{num_hp_trial}-step={trainer.global_step}.csv')
  
-    if eval_params['loss_test']>10:
-        for f in log_dir.glob('**/epoch*.ckpt'):
-            rank_zero_info(f'Test loss: {eval_params["loss_test"]}. Removing checkpoint {f}')
-            f.unlink()
+    # if eval_params['loss_test']>10:
+        # for f in log_dir.glob('**/epoch*.ckpt'):
+            # rank_zero_info(f'Test loss: {eval_params["loss_test"]}. Removing checkpoint {f}')
+            # f.unlink()
 
 if __name__=='__main__':
     main()
