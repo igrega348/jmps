@@ -156,7 +156,7 @@ def main():
     cfg = CfgDict(cfg)
 
     # run_name = os.environ['SLURM_JOB_ID']
-    run_name = '7'
+    run_name = '9'
     log_dir = par_folder/f'experiments/{run_name}'
     while log_dir.is_dir():
         run_name = str(int(run_name)+1)
@@ -197,7 +197,7 @@ def main():
         EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
     # max_time = '00:01:27:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:45:00'
-    max_time = '00:04:20:00'
+    max_time = '00:07:20:00'
     trainer = pl.Trainer(
         accelerator='auto',
         accumulate_grad_batches=4, # increase effective batch size
@@ -207,7 +207,7 @@ def main():
         enable_progress_bar=False,
         # overfit_batches=1,
         callbacks=callbacks,
-        max_steps=50000,
+        max_steps=100000,
         max_time=max_time,
         # val_check_interval=1000,
         log_every_n_steps=cfg.training.log_every_n_steps,
@@ -221,7 +221,7 @@ def main():
         params_path.write_text(yaml.dump(dict(cfg)))
 
     ############# run training ##############
-    trainer.fit(lightning_model, train_loader, valid_loader, ckpt_path=par_folder/f'experiments/7/JMPS/3iusvdan/checkpoints/epoch=1-step=23606-val_loss=385.972.ckpt')
+    trainer.fit(lightning_model, train_loader, valid_loader, ckpt_path=par_folder/f'experiments/8/JMPS/1wjinivo/checkpoints/epoch=2-step=35409-val_loss=2830841.750.ckpt')
 
     ############# run testing ##############
     rank_zero_info('Testing')
