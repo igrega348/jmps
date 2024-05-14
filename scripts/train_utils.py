@@ -14,9 +14,9 @@ import pandas as pd
 import torch
 from torch import Tensor
 from torch_geometric.data import Data
+import pytorch_lightning as pl
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 from pytorch_lightning.utilities.types import STEP_OUTPUT
-import pytorch_lightning as pl
 from e3nn import o3
 
 from gnn import GLAMM_Dataset, LatticeGraph

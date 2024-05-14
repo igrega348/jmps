@@ -41,7 +41,7 @@ def main():
     # num_hp_trial = int(os.environ['NUM_HP_TRIAL'])
     num_hp_trial = 0
 
-    desc = "Exp-1. Run all data. No rotation augmentation"
+    desc = "Exp-2. Run smaller dataset, modify model to L_a, L_r"
     rank_zero_info(desc)
     # seed_everything(0, workers=True)
 
@@ -50,11 +50,12 @@ def main():
         'model':{
             'hidden_irreps':'16x0e+16x1o+16x2e+16x3o+16x4e',
             'readout_irreps':'8x0e+8x1o+8x2e+8x3o+8x4e',
-            'num_edge_bases':10,
-            'max_edge_radius':0.018,
+            'num_edge_bases':16,
+            'max_edge_L_a': 1.5,
+            'max_edge_r_L': 0.1,
             'lmax':4,
             'message_passes':2,
-            'agg_norm_const':4.0,
+            'agg_norm_const':3.0,
             'interaction_reduction':'sum',
             'correlation':3,
             'inter_MLP_dim':64,
@@ -114,7 +115,7 @@ def main():
 
     ############# setup trainer ##############
     wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
-                               tags=['exp-1'])
+                               tags=['exp-2'])
     callbacks = [
         ModelSummary(max_depth=3),
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.3f}', every_n_epochs=1, monitor='val_loss', save_top_k=1, save_last=True),
@@ -132,7 +133,7 @@ def main():
         enable_progress_bar=False,
         # overfit_batches=1,
         callbacks=callbacks,
-        max_steps=350000,
+        max_steps=100000,
         # val_check_interval=1000,
         log_every_n_steps=cfg.training.log_every_n_steps,
         check_val_every_n_epoch=1,
@@ -145,14 +146,10 @@ def main():
         params_path.write_text(yaml.dump(dict(cfg)))
 
     ############# run training ##############
-    trainer.fit(lightning_model, train_loader, valid_loader, ckpt_path=par_folder/f'experiments/13/JMPS/xws3vu1t/checkpoints/last.ckpt')
+    trainer.fit(lightning_model, train_loader, valid_loader)
 
     ############# run testing ##############
     rank_zero_info('Testing')
-    # train_dset = load_datasets(parent=cfg.data.dset_parent, tag='train', reldens_norm=False)
-    # train_loader = DataLoader(
-        # dataset=train_dset, batch_size=cfg.training.valid_batch_size, 
-        # shuffle=False,)
     valid_loader = DataLoader(
         dataset=valid_dset, batch_size=cfg.training.valid_batch_size,
         shuffle=False,
@@ -162,18 +159,11 @@ def main():
         dataset=test_dset, batch_size=cfg.training.valid_batch_size, 
         shuffle=False, 
     )
-    # train_results = trainer.predict(lightning_model, train_loader, return_predictions=True, ckpt_path='best')
     valid_results = trainer.predict(lightning_model, valid_loader, return_predictions=True, ckpt_path='best')
     test_results = trainer.predict(lightning_model, test_loader, return_predictions=True, ckpt_path='best')
-    # df_errors = pd.concat([obtain_errors(train_results, 'train'), obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
     df_errors = pd.concat([obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
     eval_params = aggr_errors(df_errors)
     pd.Series(eval_params, name=num_hp_trial).to_csv(log_dir/f'aggr_results-{num_hp_trial}-step={trainer.global_step}.csv')
- 
-    # if eval_params['loss_test']>10:
-        # for f in log_dir.glob('**/epoch*.ckpt'):
-            # rank_zero_info(f'Test loss: {eval_params["loss_test"]}. Removing checkpoint {f}')
-            # f.unlink()
 
 if __name__=='__main__':
     main()
