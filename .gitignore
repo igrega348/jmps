@@ -163,7 +163,7 @@ cython_debug/
 *.token
 
 # Datasets and experiments
-dset/
+dset*/
 experiments/
 
 # Github access tokens backed up locally

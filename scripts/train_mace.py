@@ -27,90 +27,15 @@ from pytorch_lightning.callbacks import (
     EarlyStopping
 ) 
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
-from pytorch_lightning.utilities.seed import seed_everything
+# from pytorch_lightning.utilities.seed import seed_everything
 from torch_geometric.loader import DataLoader
 from e3nn import o3
 
 from gnn import PositiveLiteGNN
 from gnn import GLAMM_Dataset
 from gnn.callbacks import PrintTableMetrics
-from train_utils import load_datasets, obtain_errors, aggr_errors, CfgDict
+from train_utils import load_datasets, obtain_errors, aggr_errors, CfgDict, LightningWrappedModel
 # %%
-class LightningWrappedModel(pl.LightningModule):
-    _time_metrics = {}
-    
-    def __init__(self, model: torch.nn.Module, cfg: CfgDict, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.cfg = cfg
-        self.model = model(cfg) # initialize model
-        self.save_hyperparameters(cfg)
-
-    def configure_optimizers(self):
-        params = self.cfg.training
-        optim = torch.optim.AdamW(params=self.model.parameters(), lr=params.lr, 
-            betas=(params.beta1,0.999), eps=params.epsilon,
-            amsgrad=params.amsgrad, weight_decay=params.weight_decay,)
-        return optim
-
-    def training_step(self, batch, batch_idx):
-        
-        output = self.model(batch)
-
-        true_stiffness = batch['stiffness']
-        pred_stiffness = output['stiffness']
-
-        target = true_stiffness # [N, 6, 6]
-        predicted = pred_stiffness # [N, 6, 6]
-        mean_stiffness = target.pow(2).mean(dim=(1,2)) # [N]
-        stiffness_loss = torch.nn.functional.mse_loss(predicted, target, reduction='none').mean(dim=(1,2)) # [N]
-
-        stiffness_loss_mean = stiffness_loss.mean()
-
-        loss = stiffness_loss
-        loss = 100*(loss / mean_stiffness).mean() # [1]
-    
-        self.log('loss', loss, batch_size=batch.num_graphs, logger=True)
-        self.log('stiffness_loss', stiffness_loss_mean, batch_size=batch.num_graphs, logger=True, prog_bar=True)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        
-        output = self.model(batch)
-        true_stiffness = batch['stiffness']
-        pred_stiffness = output['stiffness']
-
-        target = true_stiffness
-        predicted = pred_stiffness
-        stiffness_loss = torch.nn.functional.mse_loss(predicted, target)
-  
-        loss = stiffness_loss
-    
-        self.log('val_loss', loss, batch_size=batch.num_graphs, logger=True, prog_bar=True, sync_dist=True)
-        return loss
-        
-    def predict_step(self, batch: Any, batch_idx: int = 0, dataloader_idx: int = 0) -> Tuple:
-        """Returns (prediction, true)"""
-        return self.model(batch), batch
-    
-    def on_train_epoch_start(self) -> None:
-        self._time_metrics['_last_step'] = self.trainer.global_step
-        self._time_metrics['_last_time'] = time.time()
-
-    def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
-        step = self.trainer.global_step
-        steps_done = step - self._time_metrics['_last_step']
-        time_now = time.time()
-        time_taken = time_now - self._time_metrics['_last_time']
-        steps_per_sec = steps_done / time_taken
-        self._time_metrics['_last_step'] = step
-        self._time_metrics['_last_time'] = time_now
-        self.log('steps_per_time', steps_per_sec, prog_bar=False, logger=True)
-        # check if loss is nan
-        loss = outputs['loss']
-        if torch.isnan(loss):
-            self.trainer.should_stop = True
-            rank_zero_info('Loss is NaN. Stopping training')
-
 def main():
     # df = pd.read_csv('./mace-hparams-216.csv', index_col=0)
     # num_hp_trial = int(os.environ['NUM_HP_TRIAL'])
@@ -118,7 +43,7 @@ def main():
 
     desc = "Exp-1. Run all data. No rotation augmentation"
     rank_zero_info(desc)
-    seed_everything(0, workers=True)
+    # seed_everything(0, workers=True)
 
     cfg = {
         'desc':desc,
@@ -156,7 +81,7 @@ def main():
     cfg = CfgDict(cfg)
 
     # run_name = os.environ['SLURM_JOB_ID']
-    run_name = '9'
+    run_name = '13'
     log_dir = par_folder/f'experiments/{run_name}'
     while log_dir.is_dir():
         run_name = str(int(run_name)+1)
@@ -192,14 +117,14 @@ def main():
                                tags=['exp-1'])
     callbacks = [
         ModelSummary(max_depth=3),
-        ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.3f}', every_n_epochs=1, monitor='val_loss', save_top_k=1),
-        PrintTableMetrics(['epoch','step','loss','val_loss'], every_n_steps=100),
+        ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.3f}', every_n_epochs=1, monitor='val_loss', save_top_k=1, save_last=True),
+        PrintTableMetrics(['epoch','step','loss','val_loss'], every_n_steps=1000),
         EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
     # max_time = '00:01:27:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:45:00'
-    max_time = '00:07:20:00'
     trainer = pl.Trainer(
-        accelerator='auto',
+        accelerator='gpu',
+        devices=1,
         accumulate_grad_batches=4, # increase effective batch size
         gradient_clip_val=10.0,
         default_root_dir=cfg.log_dir,
@@ -207,8 +132,7 @@ def main():
         enable_progress_bar=False,
         # overfit_batches=1,
         callbacks=callbacks,
-        max_steps=100000,
-        max_time=max_time,
+        max_steps=350000,
         # val_check_interval=1000,
         log_every_n_steps=cfg.training.log_every_n_steps,
         check_val_every_n_epoch=1,
@@ -221,7 +145,7 @@ def main():
         params_path.write_text(yaml.dump(dict(cfg)))
 
     ############# run training ##############
-    trainer.fit(lightning_model, train_loader, valid_loader, ckpt_path=par_folder/f'experiments/8/JMPS/1wjinivo/checkpoints/epoch=2-step=35409-val_loss=2830841.750.ckpt')
+    trainer.fit(lightning_model, train_loader, valid_loader, ckpt_path=par_folder/f'experiments/13/JMPS/xws3vu1t/checkpoints/last.ckpt')
 
     ############# run testing ##############
     rank_zero_info('Testing')
