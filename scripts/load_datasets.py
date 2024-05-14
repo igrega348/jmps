@@ -6,27 +6,38 @@ if str(folder) not in sys.path:
     sys.path.insert(0, str(folder))
 import random
 
-from torch_geometric.data import Batch
 from tqdm import trange, tqdm
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import pandas as pd
 
 from lattices.lattices import Catalogue
-from gnn import GLAMM_Dataset
-# %% Load all base names from catalogues
+# %% Load just without imperfections and choose the ones which have smaller number of nodes/edges
 base_names = set()
-for i in trange(50):
-    f = Path(f'E:/rad_dset_0/cat_{i:02d}_rad.lat')
-    base_names = base_names | set([Catalogue.n_2_bn(n) for n in Catalogue.get_names(f)])
-print(len(base_names)) # 10163
-# %%
-base_names = set()
+all_num_edges = []
+all_num_nodes = []
 for i in range(5):
-    f = Path(f"E:/Dropbox (Cambridge University)/neural-networks/GLAMM/rad_dset_0/cat_{i:02d}_rad.lat")
-    base_names = base_names | set([Catalogue.n_2_bn(n) for n in Catalogue.get_names(f)])
+    f = Path(f"E:/Dropbox (Cambridge University) (Old)/neural-networks/GLAMM/rad_dset_0/cat_{i:02d}_rad.lat")
+    cat = Catalogue.from_file(f, 0, regex='.*_p_0.0_.*') # no imperfections
+    for data in tqdm(cat):
+        name = data['name']
+        bn = Catalogue.n_2_bn(name)
+        num_edges = len(data.fundamental_edge_adjacency)
+        num_nodes = len(np.unique(data.fundamental_edge_adjacency))
+        if num_edges < 50 and num_nodes < 20:
+            all_num_edges.append(num_edges)
+            all_num_nodes.append(num_nodes)
+            base_names.add(bn)
 print(len(base_names)) # 8723 -- filtered
 base_names = list(base_names)
+# %%
+df = pd.DataFrame({'num_edges': all_num_edges, 'num_nodes': all_num_nodes})
+df.describe()
 # %% Split base names into train, val, test approx 80/10/10
 n = len(base_names)
-n_train, n_val, n_test = 7000, 873, n-7000-873
+n_train, n_val = 3600, 450
+n_test = n-n_train-n_val
 random.shuffle(base_names)
 train = base_names[:n_train]
 val = base_names[n_train:n_train+n_val]
@@ -38,7 +49,7 @@ Path('test.txt').write_text('\n'.join(test))
 # %% Assemble train catalogue
 cat_dicts = {'train':{}, 'val':{}, 'test':{}}
 for i in range(5):
-    f = Path(f"E:/Dropbox (Cambridge University)/neural-networks/GLAMM/rad_dset_0/cat_{i:02d}_rad.lat")
+    f = Path(f"E:/Dropbox (Cambridge University) (Old)/neural-networks/GLAMM/rad_dset_0/cat_{i:02d}_rad.lat")
     cat = Catalogue.from_file(f, 0)
     for data in tqdm(cat):
         name = data['name']
