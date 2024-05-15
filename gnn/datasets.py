@@ -103,15 +103,15 @@ class LatticeGraph(Data):
     
     @property
     def lattice_constant_per_edge(self) -> torch.Tensor:
-        """Return 1st lattice constant for each edge in the graph."""
+        """Return 3 lattice constant for each edge in the graph."""
         edge_index = self.edge_index
         sender, _ = edge_index
         if hasattr(self, 'batch') and self.batch is not None:
             batch = self.batch
             batch_map = batch[sender]
-            lattice_constants = self.lattice_constants[batch_map, 0]
+            lattice_constants = self.lattice_constants[batch_map, :3]
         else:
-            lattice_constants = self.lattice_constants[0]
+            lattice_constants = self.lattice_constants[:3]
         return lattice_constants
 
 class GLAMM_Dataset(InMemoryDataset):

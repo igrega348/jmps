@@ -145,8 +145,11 @@ class PositiveLiteGNN(torch.nn.Module):
         )
         # normalization for edge vectors and L/r
         edge_r_L = edge_radii / lengths
-        lat_const_a = batch.lattice_constant_per_edge.view(-1,1)
-        edge_L_a = lengths / lat_const_a
+        lat_const = batch.lattice_constant_per_edge
+        assert lat_const.shape[0]==lengths.shape[0]
+        assert lat_const.shape[1]==3
+        abc = torch.pow(lat_const.prod(dim=1), 1/3)
+        edge_L_a = lengths / abc
         # manual bidirectional edges
         vectors = torch.cat((vectors, -vectors), dim=0)
         edge_L_a = torch.cat((edge_L_a, edge_L_a), dim=0)

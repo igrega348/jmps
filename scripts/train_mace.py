@@ -1,47 +1,31 @@
 # %%
-import os
 import sys
 from pathlib import Path
 par_folder = Path(__file__).absolute().parents[1]
 if str(par_folder) not in sys.path:
     sys.path.insert(0, str(par_folder))
-from argparse import Namespace
-import json
 import yaml
-import time
-from typing import Any, Tuple, Optional
 from pathlib import Path
+from datetime import datetime
 
-import numpy as np
 import pandas as pd
-import torch
-from torch import Tensor
-from torch_geometric.data import Data
 import pytorch_lightning as pl
-from pytorch_lightning.utilities.types import STEP_OUTPUT
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import (
     ModelSummary, 
     ModelCheckpoint, 
-    TQDMProgressBar,
     EarlyStopping
 ) 
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 # from pytorch_lightning.utilities.seed import seed_everything
 from torch_geometric.loader import DataLoader
-from e3nn import o3
 
 from gnn import PositiveLiteGNN
-from gnn import GLAMM_Dataset
 from gnn.callbacks import PrintTableMetrics
 from train_utils import load_datasets, obtain_errors, aggr_errors, CfgDict, LightningWrappedModel
 # %%
 def main():
-    # df = pd.read_csv('./mace-hparams-216.csv', index_col=0)
-    # num_hp_trial = int(os.environ['NUM_HP_TRIAL'])
-    num_hp_trial = 0
-
-    desc = "Exp-2. Run smaller dataset, modify model to L_a, L_r"
+    desc = "Exp-3. Run smaller dataset, modify model to L_abc, L_r"
     rank_zero_info(desc)
     # seed_everything(0, workers=True)
 
@@ -82,7 +66,7 @@ def main():
     cfg = CfgDict(cfg)
 
     # run_name = os.environ['SLURM_JOB_ID']
-    run_name = '13'
+    run_name = '16'
     log_dir = par_folder/f'experiments/{run_name}'
     while log_dir.is_dir():
         run_name = str(int(run_name)+1)
@@ -115,7 +99,7 @@ def main():
 
     ############# setup trainer ##############
     wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
-                               tags=['exp-2'])
+                               tags=['exp-3'])
     callbacks = [
         ModelSummary(max_depth=3),
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.3f}', every_n_epochs=1, monitor='val_loss', save_top_k=1, save_last=True),
@@ -133,7 +117,7 @@ def main():
         enable_progress_bar=False,
         # overfit_batches=1,
         callbacks=callbacks,
-        max_steps=100000,
+        max_steps=200000,
         # val_check_interval=1000,
         log_every_n_steps=cfg.training.log_every_n_steps,
         check_val_every_n_epoch=1,
@@ -142,7 +126,7 @@ def main():
 
     ############# save params ##############
     if trainer.is_global_zero:
-        params_path = log_dir/f'params-{num_hp_trial}.yml'
+        params_path = log_dir/f'params-{run_name}.yml'
         params_path.write_text(yaml.dump(dict(cfg)))
 
     ############# run training ##############
@@ -163,7 +147,8 @@ def main():
     test_results = trainer.predict(lightning_model, test_loader, return_predictions=True, ckpt_path='best')
     df_errors = pd.concat([obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
     eval_params = aggr_errors(df_errors)
-    pd.Series(eval_params, name=num_hp_trial).to_csv(log_dir/f'aggr_results-{num_hp_trial}-step={trainer.global_step}.csv')
+    pd.Series(eval_params, name=run_name).to_csv(log_dir/f'aggr_results-{run_name}-step={trainer.global_step}.csv')
+    rank_zero_info(f"Finished at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__=='__main__':
     main()
