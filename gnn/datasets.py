@@ -109,10 +109,10 @@ class LatticeGraph(Data):
         if hasattr(self, 'batch') and self.batch is not None:
             batch = self.batch
             batch_map = batch[sender]
-            lattice_constants = self.lattice_constants[batch_map, :3]
+            lat_const = self.lattice_constants[batch_map, :3]
         else:
-            lattice_constants = self.lattice_constants[:3]
-        return lattice_constants
+            lat_const = self.lattice_constants[:3]
+        return lat_const
 
 class GLAMM_Dataset(InMemoryDataset):
     r"""Lattice dataset.

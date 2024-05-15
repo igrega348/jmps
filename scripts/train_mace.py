@@ -35,7 +35,7 @@ def main():
             'hidden_irreps':'16x0e+16x1o+16x2e+16x3o+16x4e',
             'readout_irreps':'8x0e+8x1o+8x2e+8x3o+8x4e',
             'num_edge_bases':16,
-            'max_edge_L_a': 1.5,
+            'max_edge_L_a': 1.2,
             'max_edge_r_L': 0.1,
             'lmax':4,
             'message_passes':2,
