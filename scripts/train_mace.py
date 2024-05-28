@@ -1,4 +1,5 @@
 # %%
+import os
 import sys
 from pathlib import Path
 par_folder = Path(__file__).absolute().parents[1]
@@ -25,7 +26,7 @@ from gnn.callbacks import PrintTableMetrics
 from train_utils import load_datasets, obtain_errors, aggr_errors, CfgDict, LightningWrappedModel
 # %%
 def main():
-    desc = "Exp-3. Run smaller dataset, modify model to L_abc, L_r"
+    desc = "Exp-4. Run with new dataset, modify model to L_abc, L_r"
     rank_zero_info(desc)
     # seed_everything(0, workers=True)
 
@@ -36,7 +37,7 @@ def main():
             'readout_irreps':'8x0e+8x1o+8x2e+8x3o+8x4e',
             'num_edge_bases':16,
             'max_edge_L_a': 1.2,
-            'max_edge_r_L': 0.1,
+            'max_edge_r_L': 1.0,
             'lmax':4,
             'message_passes':2,
             'agg_norm_const':3.0,
@@ -53,9 +54,9 @@ def main():
         'training':{
             'batch_size':16,
             'valid_batch_size':64,
-            'log_every_n_steps':100,
+            'log_every_n_steps':10,
             'optimizer':'adamw',
-            'lr':1e-3, 
+            'lr':1e-4, 
             'amsgrad':True,
             'weight_decay':1e-8,
             'beta1':0.9,
@@ -66,7 +67,7 @@ def main():
     cfg = CfgDict(cfg)
 
     # run_name = os.environ['SLURM_JOB_ID']
-    run_name = '16'
+    run_name = '20'
     log_dir = par_folder/f'experiments/{run_name}'
     while log_dir.is_dir():
         run_name = str(int(run_name)+1)
@@ -99,28 +100,31 @@ def main():
 
     ############# setup trainer ##############
     wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
-                               tags=['exp-3'])
+                               tags=['exp-4'])
+    wandb_logger.watch(lightning_model, log="all")
+    
     callbacks = [
         ModelSummary(max_depth=3),
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.3f}', every_n_epochs=1, monitor='val_loss', save_top_k=1, save_last=True),
-        PrintTableMetrics(['epoch','step','loss','val_loss'], every_n_steps=1000),
-        EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
+        PrintTableMetrics(['epoch','step','loss','val_loss'], every_n_steps=20),
+        # EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
-    # max_time = '00:01:27:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:45:00'
+    max_time = '00:03:00:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:03:00:00'
     trainer = pl.Trainer(
         accelerator='gpu',
         devices=1,
         accumulate_grad_batches=4, # increase effective batch size
-        gradient_clip_val=10.0,
+        gradient_clip_val=1.0,
         default_root_dir=cfg.log_dir,
         logger=wandb_logger,
         enable_progress_bar=False,
         # overfit_batches=1,
         callbacks=callbacks,
         max_steps=200000,
-        # val_check_interval=1000,
+        max_time=max_time,
+        val_check_interval=100,
         log_every_n_steps=cfg.training.log_every_n_steps,
-        check_val_every_n_epoch=1,
+        # check_val_every_n_epoch=1,
         # limit_val_batches=0.1
     )
 
@@ -138,14 +142,15 @@ def main():
         dataset=valid_dset, batch_size=cfg.training.valid_batch_size,
         shuffle=False,
     )
-    test_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
-    test_loader = DataLoader(
-        dataset=test_dset, batch_size=cfg.training.valid_batch_size, 
-        shuffle=False, 
-    )
+    # test_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
+    # test_loader = DataLoader(
+        # dataset=test_dset, batch_size=cfg.training.valid_batch_size, 
+        # shuffle=False, 
+    # )
     valid_results = trainer.predict(lightning_model, valid_loader, return_predictions=True, ckpt_path='best')
-    test_results = trainer.predict(lightning_model, test_loader, return_predictions=True, ckpt_path='best')
-    df_errors = pd.concat([obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
+    # test_results = trainer.predict(lightning_model, test_loader, return_predictions=True, ckpt_path='best')
+    df_errors = obtain_errors(valid_results, 'valid')
+    # df_errors = pd.concat([obtain_errors(valid_results, 'valid'), obtain_errors(test_results, 'test')], axis=0, ignore_index=True)
     eval_params = aggr_errors(df_errors)
     pd.Series(eval_params, name=run_name).to_csv(log_dir/f'aggr_results-{run_name}-step={trainer.global_step}.csv')
     rank_zero_info(f"Finished at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

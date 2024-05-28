@@ -151,7 +151,7 @@ def load_datasets(tag: str, parent: str = '../../datasets', reldens_norm: bool =
     if reldens_norm:
         normalization_factor = 10 / dset.data.rel_dens.view(-1,1,1,1,1)
     else:
-        normalization_factor = 10000 # increased again because we're targeting relative densities on the order of 0.001
+        normalization_factor = 300 # we're targeting relative densities on the order of 0.03
 
     dset.data.stiffness = (dset.data.stiffness * normalization_factor).float()
     dset.data.compliance = (dset.data.compliance / normalization_factor).float()
