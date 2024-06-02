@@ -7,7 +7,8 @@ if str(par_folder) not in sys.path:
     sys.path.insert(0, str(par_folder))
 from argparse import Namespace
 import time
-from typing import Any, Tuple, Optional
+import yaml
+from typing import Any, Tuple, Optional, Union
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -38,50 +39,25 @@ from gnn.callbacks import PrintTableMetrics
 from train_utils import load_datasets, CfgDict, LightningWrappedModel
 from lattices.lattices import plotting, elasticity_func, Catalogue
 # %%
-def setup_model():
-    cfg = {
-        # 'desc':desc,
-        'model':{
-            'hidden_irreps':'16x0e+16x1o+16x2e+16x3o+16x4e',
-            'readout_irreps':'8x0e+8x1o+8x2e+8x3o+8x4e',
-            'num_edge_bases':10,
-            'max_edge_radius':0.018,
-            'lmax':4,
-            'message_passes':2,
-            'agg_norm_const':4.0,
-            'interaction_reduction':'sum',
-            'correlation':3,
-            'inter_MLP_dim':64,
-            'inter_MLP_layers':3,
-            'global_reduction':'mean',
-            'positive_function':'matrix_power_2',
-        },
-        'data':{
-            'dset_parent':str(par_folder/'dset'),
-        },
-        'training':{
-            'batch_size':16,
-            'valid_batch_size':64,
-            'log_every_n_steps':100,
-            'optimizer':'adamw',
-            'lr':1e-3, 
-            'amsgrad':True,
-            'weight_decay':1e-8,
-            'beta1':0.9,
-            'epsilon':1e-8,
-            'num_workers':4,
-        }
-    }
+def setup_model(log_dir: Union[Path, str]):
+    if isinstance(log_dir, str):
+        log_dir = Path(log_dir)
+    cfg_path = list(log_dir.glob('*.yml'))[0]
+    print(f'Loading config from {cfg_path}')
+    cfg = yaml.safe_load(cfg_path.read_text())
     cfg = CfgDict(cfg)
-    cfg.log_dir = Path('../experiments/12').as_posix()
 
     ############# setup data ##############
-    train_dset = load_datasets(parent=cfg.data.dset_parent, tag='train', reldens_norm=False)
-    valid_dset = load_datasets(parent=cfg.data.dset_parent, tag='valid', reldens_norm=False)
-    test_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
+    # train_dset = load_datasets(parent=cfg.data.dset_parent, tag='train', reldens_norm=False)
+    # valid_dset = load_datasets(parent=cfg.data.dset_parent, tag='valid', reldens_norm=False)
+    test_dset = load_datasets(parent=Path('../../JMPS_data/aug1'), tag='test', reldens_norm=False)
+    train_dset = None
+    valid_dset = None
 
     ############# setup model ##############
-    lightning_model = LightningWrappedModel(PositiveLiteGNN, cfg)
+    model_ckpt = list(log_dir.glob('**/*.ckpt'))[0]
+    print(f'Loading model from {model_ckpt}')
+    lightning_model = LightningWrappedModel.load_from_checkpoint(checkpoint_path=model_ckpt, model=PositiveLiteGNN, cfg=cfg)
 
     ############# setup trainer ##############
     trainer = pl.Trainer(
@@ -90,9 +66,7 @@ def setup_model():
     )
     return trainer, lightning_model, train_dset, valid_dset, test_dset
 # %%
-trainer, lightning_model, train_dset, valid_dset, test_dset = setup_model()
-# %%
-ckpt_model = lightning_model.load_from_checkpoint(r'..\experiments\12\JMPS\bs5mn82f\checkpoints\last.ckpt', model=PositiveLiteGNN, cfg=lightning_model.cfg)
+trainer, ckpt_model, train_dset, valid_dset, test_dset = setup_model('../experiments/38')
 # %%
 results = {}
 # %%
@@ -115,7 +89,7 @@ plotting.plotly_tensor_projection(elasticity_func.stiffness_Mandel_to_cart_4(gt_
 plotting.plotly_tensor_projection(elasticity_func.stiffness_Mandel_to_cart_4(pred_train[0]), title='pred')
 # %%
 test_loader = DataLoader(
-    dataset=test_dset[:2**13], 
+    dataset=test_dset, 
     batch_size=16,
     shuffle=False,
 )
@@ -128,11 +102,18 @@ results['gt_test'] = gt_test
 results['pred_test'] = pred_test
 results['names_test'] = names_test
 # %%
-plotting.plotly_tensor_projection(elasticity_func.stiffness_Mandel_to_cart_4(gt_test[6317]), title='gt').show()
-plotting.plotly_tensor_projection(elasticity_func.stiffness_Mandel_to_cart_4(pred_test[6317]), title='pred').show()
+i = 101
+axis_conf = {}
+axis_conf['range']=[-0.8, 0.8]
+fig = plotting.plotly_tensor_projection(elasticity_func.stiffness_Mandel_to_cart_4(gt_test[i]), title='gt')
+fig.update_layout(scene=dict(xaxis=axis_conf, yaxis=axis_conf, zaxis=axis_conf, aspectmode='cube'))
+fig.show()
+fig = plotting.plotly_tensor_projection(elasticity_func.stiffness_Mandel_to_cart_4(pred_test[i]), title='pred')
+fig.update_layout(scene=dict(xaxis=axis_conf, yaxis=axis_conf, zaxis=axis_conf, aspectmode='cube'))
+fig.show()
 # %%
 err_results = {}
-for split in ['train', 'test']:
+for split in ['test']:
     gt = results[f'gt_{split}']
     pred = results[f'pred_{split}']
     gt_eig = torch.linalg.eigvalsh(gt)
@@ -144,18 +125,19 @@ for split in ['train', 'test']:
     err_results[f'rel_{split}'] = errors / magnitudes
     err_results[f'names_{split}'] = results[f'names_{split}']
 df = pd.DataFrame(err_results).sort_values('rel_test')
-df.to_csv('../figs/results-epoch16_2.csv')
+# df.to_csv('../results-allaug.csv')
 df
 # %%
-sns.histplot(df['err_train'], log_scale=True, kde=True, legend=True, alpha=0.2, label='train', stat='density', color='C0')
+# sns.histplot(df['err_train'], log_scale=True, kde=True, legend=True, alpha=0.2, label='train', stat='density', color='C0')
 sns.histplot(df['err_test'], log_scale=True, kde=True, legend=True, alpha=0.2, label='test', stat='density', color='C1')
 plt.legend()
 plt.xlabel('MSE')
 plt.ylabel('Probability density')
-# plt.savefig('mse_hist.png')
+plt.xlim(1e-5, 1)
+# plt.savefig('../mse_hist_allaug.svg')
 plt.show()
 # %%
-sns.histplot(df['rel_train'], log_scale=True, bins=20, kde=True, legend=True, alpha=0.2, label='train', stat='density', color='C0')
+# sns.histplot(df['rel_train'], log_scale=True, bins=20, kde=True, legend=True, alpha=0.2, label='train', stat='density', color='C0')
 sns.histplot(df['rel_test'], log_scale=True, bins=20, kde=True, legend=True, alpha=0.2, label='test', stat='density', color='C1')
 indices_plot = [100, 4000, 8000]
 # for idx in indices_plot:
@@ -164,6 +146,7 @@ indices_plot = [100, 4000, 8000]
 plt.legend()
 plt.xlabel('Rel MSE')
 plt.ylabel('Probability density')
+plt.xlim(1e-3, 100)
 # plt.savefig('../figs/relmse_hist.svg')
 # plt.savefig('mse_hist.png')
 plt.show()
