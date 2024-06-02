@@ -28,59 +28,14 @@ from gnn.callbacks import PrintTableMetrics
 from train_utils import load_datasets, obtain_errors, aggr_errors, CfgDict, LightningWrappedModel
 # %%
 def main():
-    desc = "Exp-4. Run with new dataset, modify model to L_abc, L_r. Finetune with SWA"
-    rank_zero_info(desc)
-    # seed_everything(0, workers=True)
-
-    cfg = {
-        'desc':desc,
-        'model':{
-            'hidden_irreps':'16x0e+16x1o+16x2e+16x3o+16x4e',
-            'readout_irreps':'8x0e+8x1o+8x2e+8x3o+8x4e',
-            'num_edge_bases':16,
-            'max_edge_L_a': 1.2,
-            'max_edge_r_L': 1.0,
-            'lmax':4,
-            'message_passes':2,
-            'agg_norm_const':3.0,
-            'interaction_reduction':'sum',
-            'correlation':3,
-            'inter_MLP_dim':64,
-            'inter_MLP_layers':3,
-            'global_reduction':'mean',
-            'positive_function':'matrix_power_2',
-        },
-        'data':{
-            'dset_parent':str(par_folder/'dset'),
-        },
-        'training':{
-            'batch_size':16,
-            'valid_batch_size':64,
-            'log_every_n_steps':10,
-            'optimizer':'adamw',
-            'lr':3e-5, 
-            'scheduler':'CosineAnnealing',
-            'scheduler.T_max':10000,
-            # 'scheduler':'CosineAnnealingWarmRestarts',
-            # 'scheduler.T_0':5000,
-            'amsgrad':True,
-            'weight_decay':1e-8,
-            'beta1':0.9,
-            'epsilon':1e-8,
-            'num_workers':4,
-        }
-    }
+    run_name = os.environ['RUNNAME']
+    log_dir = par_folder/'experiments'/f'{run_name}'
+    rank_zero_info(log_dir)
+    cfg_path = log_dir/f'params-{run_name}.yml'
+    cfg = yaml.safe_load(cfg_path.read_text())   
     cfg = CfgDict(cfg)
 
-    # run_name = os.environ['SLURM_JOB_ID']
-    run_name = '20'
-    log_dir = par_folder/f'experiments/{run_name}'
-    while log_dir.is_dir():
-        run_name = str(int(run_name)+1)
-        log_dir = par_folder/f'experiments/{run_name}'
-    log_dir.mkdir(parents=True)
-    rank_zero_info(log_dir)
-    cfg.log_dir = str(log_dir)
+    assert log_dir.is_dir()
 
     ############# setup data ##############
     train_dset = load_datasets(parent=cfg.data.dset_parent, tag='train', reldens_norm=False)
@@ -106,7 +61,7 @@ def main():
 
     ############# setup trainer ##############
     wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
-                               tags=['exp-4'])
+                               tags=['exp-5'])
     wandb_logger.watch(lightning_model, log="all")
     
     callbacks = [
@@ -114,13 +69,11 @@ def main():
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.4f}', every_n_epochs=1, monitor='val_loss', save_top_k=1, save_last=True),
         PrintTableMetrics(['epoch','step','loss','val_loss','lr'], every_n_steps=100),
         LearningRateMonitor(logging_interval='step'),
-        StochasticWeightAveraging(5e-6, swa_epoch_start=1, annealing_epochs=1, annealing_strategy='cos'),
         # EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
-    max_time = '00:13:30:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:03:00:00'
+    max_time = '00:05:00:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:00:00'
     trainer = pl.Trainer(
-        accelerator='gpu',
-        devices=1,
+        accelerator='auto',
         accumulate_grad_batches=4, # increase effective batch size
         gradient_clip_val=1.0,
         default_root_dir=cfg.log_dir,
@@ -128,7 +81,7 @@ def main():
         enable_progress_bar=False,
         # overfit_batches=1,
         callbacks=callbacks,
-        max_steps=70000,
+        max_steps=50000,
         max_time=max_time,
         val_check_interval=200,
         log_every_n_steps=cfg.training.log_every_n_steps,
@@ -138,11 +91,11 @@ def main():
 
     ############# save params ##############
     if trainer.is_global_zero:
-        params_path = log_dir/f'params-{run_name}.yml'
+        params_path = log_dir/f'_params-{run_name}.yml'
         params_path.write_text(yaml.dump(dict(cfg)))
 
     ############# run training ##############
-    trainer.fit(lightning_model, train_loader, valid_loader, ckpt_path='/rds/user/ig348/hpc-work/GLAMM/jmps/experiments/38/JMPS/bm1mnrou/checkpoints/epoch=5-step=43305-val_loss=0.0059.ckpt')
+    trainer.fit(lightning_model, train_loader, valid_loader)
 
     ############# run testing ##############
     rank_zero_info('Testing')
