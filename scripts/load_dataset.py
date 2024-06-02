@@ -39,7 +39,7 @@ from train_utils import load_datasets, obtain_errors, aggr_errors, CfgDict
 
 def main():
     ############# setup data ##############
-    dset_parent = par_folder/'dset'
+    dset_parent = par_folder/'aug5'
     train_dset = load_datasets(parent=dset_parent, tag='train', reldens_norm=False)
     valid_dset = load_datasets(parent=dset_parent, tag='valid', reldens_norm=False)
     test_dset = load_datasets(parent=dset_parent, tag='test', reldens_norm=False)

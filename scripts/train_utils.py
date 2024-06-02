@@ -151,7 +151,7 @@ def load_datasets(tag: str, parent: str = '../../datasets', reldens_norm: bool =
     if reldens_norm:
         normalization_factor = 10 / dset.data.rel_dens.view(-1,1,1,1,1)
     else:
-        normalization_factor = 10000 # increased again because we're targeting relative densities on the order of 0.001
+        normalization_factor = 300 # we're targeting relative densities on the order of 0.03
 
     dset.data.stiffness = (dset.data.stiffness * normalization_factor).float()
     dset.data.compliance = (dset.data.compliance / normalization_factor).float()
@@ -172,6 +172,32 @@ class LightningWrappedModel(pl.LightningModule):
         optim = torch.optim.AdamW(params=self.model.parameters(), lr=params.lr, 
             betas=(params.beta1,0.999), eps=params.epsilon,
             amsgrad=params.amsgrad, weight_decay=params.weight_decay,)
+        if params.get('scheduler', '')=='CosineAnnealing':
+            rank_zero_info(f'Setting up CosineAnnealing')
+            T_max = params.get('scheduler.T_max', 10000)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=T_max)
+            lr_scheduler_config = {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
+                }
+            return {
+                "optimizer": optim,
+                "lr_scheduler": lr_scheduler_config,
+            }
+        elif params.get('scheduler', '')=='CosineAnnealingWarmRestarts':
+            rank_zero_info(f'Setting up CosineAnnealingWarmRestarts')
+            T_0 = params.get('scheduler.T_0', 10000)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=T_0)
+            lr_scheduler_config = {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
+                }
+            return {
+                "optimizer": optim,
+                "lr_scheduler": lr_scheduler_config,
+            }
         return optim
 
     def training_step(self, batch, batch_idx):
