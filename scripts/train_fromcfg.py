@@ -61,13 +61,13 @@ def main():
 
     ############# setup trainer ##############
     wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
-                               tags=['exp-6'])
+                               tags=cfg.tags)
     wandb_logger.watch(lightning_model, log="all")
     
     callbacks = [
         ModelSummary(max_depth=3),
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.4f}', every_n_epochs=1, monitor='val_loss', save_top_k=1, save_last=True),
-        PrintTableMetrics(['epoch','step','loss','val_loss','lr'], every_n_steps=1010*cfg.training.log_every_n_steps),
+        PrintTableMetrics(['epoch','step','loss','val_loss','lr'], every_n_steps=100*cfg.training.log_every_n_steps),
         LearningRateMonitor(logging_interval='step'),
         # EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]

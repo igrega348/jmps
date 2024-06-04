@@ -5,7 +5,7 @@
 #SBATCH -A DESHPANDE-SL2-GPU
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=15:20:00
+#SBATCH --time=03:20:00
 #SBATCH --mail-type=ALL
 ##SBATCH --output=./slurm_logs/slurm-%j.log
 
@@ -53,7 +53,7 @@ export OMP_NUM_THREADS=1
 #! Number of MPI tasks to be started by the application per node and in total (do not change):
 np=$[${numnodes}*${mpi_tasks_per_node}]
 
-export RUNNAME=76
+export RUNNAME=88
 CMD="python train_fromcfg.py"
 
 
