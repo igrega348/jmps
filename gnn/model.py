@@ -119,7 +119,7 @@ class PositiveLiteGNN(torch.nn.Module):
         self.node_ft_embedding = torch.nn.Linear(in_features=1, out_features=hidden_irreps.count(o3.Irrep(0,1)))
         self.number_of_edge_basis = params.num_edge_bases
         self.max_edge_L_a = params.max_edge_L_a
-        self.max_edge_r_L = params.max_edge_r_L
+        self.max_edge_r_a = params.max_edge_r_a
         edge_attr_irreps = o3.Irreps.spherical_harmonics(params.lmax)
         self.spherical_harmonics = o3.SphericalHarmonics(
             edge_attr_irreps,
@@ -143,23 +143,23 @@ class PositiveLiteGNN(torch.nn.Module):
         vectors, lengths = get_edge_vectors_and_lengths(
             positions=batch.pos, edge_index=edge_index, shifts=shifts
         )
-        # normalization for edge vectors and L/r
-        edge_r_L = edge_radii / lengths
+        # normalization for edge lengths and radii
         lat_const = batch.lattice_constant_per_edge
         abc = torch.pow(lat_const.prod(dim=1), 1/3).view(-1,1)
+        edge_r_a = edge_radii / abc
         edge_L_a = lengths / abc
 
         # manual bidirectional edges
         vectors = torch.cat((vectors, -vectors), dim=0)
         edge_L_a = torch.cat((edge_L_a, edge_L_a), dim=0)
         edge_index = torch.cat((edge_index, torch.flip(edge_index, [0])), dim=1)
-        edge_r_L = torch.cat((edge_r_L, edge_r_L), dim=0)
+        edge_r_a = torch.cat((edge_r_a, edge_r_a), dim=0)
 
         edge_length_embedding = soft_one_hot_linspace(
             edge_L_a.squeeze(-1), start=0, end=self.max_edge_L_a, number=self.number_of_edge_basis, basis='gaussian', cutoff=False
         )
         edge_radius_embedding = soft_one_hot_linspace(
-            edge_r_L.squeeze(-1), 0, self.max_edge_r_L, self.number_of_edge_basis, 'gaussian', False
+            edge_r_a.squeeze(-1), 0, self.max_edge_r_a, self.number_of_edge_basis, 'gaussian', False
         )
         edge_feats = torch.cat(
             (edge_length_embedding, edge_radius_embedding), 
