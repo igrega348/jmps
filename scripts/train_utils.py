@@ -188,7 +188,7 @@ class LightningWrappedModel(pl.LightningModule):
         elif params.get('scheduler', '')=='CosineAnnealingWarmRestarts':
             rank_zero_info(f'Setting up CosineAnnealingWarmRestarts')
             T_0 = params.get('scheduler.T_0', 10000)
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=T_0)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optim, T_0=T_0, eta_min=1e-6)
             lr_scheduler_config = {
                 "scheduler": scheduler,
                 "interval": "step",

@@ -38,8 +38,8 @@ def main():
     assert log_dir.is_dir()
 
     ############# setup data ##############
-    train_dset = load_datasets(parent=cfg.data.dset_parent, tag='train', reldens_norm=False)
-    valid_dset = load_datasets(parent=cfg.data.dset_parent, tag='valid', reldens_norm=False)
+    train_dset = load_datasets(parent=cfg.data.train_dset_parent, tag='train', reldens_norm=False)
+    valid_dset = load_datasets(parent=cfg.data.val_dset_parent, tag='valid', reldens_norm=False)
 
     # randomize the order of the dataset into loader
     train_loader = DataLoader(
@@ -61,32 +61,28 @@ def main():
 
     ############# setup trainer ##############
     wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
-                               tags=['exp-5'])
+                               tags=['exp-6'])
     wandb_logger.watch(lightning_model, log="all")
     
     callbacks = [
         ModelSummary(max_depth=3),
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.4f}', every_n_epochs=1, monitor='val_loss', save_top_k=1, save_last=True),
-        PrintTableMetrics(['epoch','step','loss','val_loss','lr'], every_n_steps=100),
+        PrintTableMetrics(['epoch','step','loss','val_loss','lr'], every_n_steps=1010*cfg.training.log_every_n_steps),
         LearningRateMonitor(logging_interval='step'),
         # EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
-    max_time = '00:05:00:00' if os.environ['SLURM_JOB_PARTITION']=='ampere' else '00:05:00:00'
     trainer = pl.Trainer(
         accelerator='auto',
-        accumulate_grad_batches=4, # increase effective batch size
-        gradient_clip_val=1.0,
+        accumulate_grad_batches=cfg.training.accumulate_grad_batches, 
+        gradient_clip_val=cfg.training.gradient_clip_val,
         default_root_dir=cfg.log_dir,
         logger=wandb_logger,
         enable_progress_bar=False,
-        # overfit_batches=1,
         callbacks=callbacks,
-        max_steps=50000,
-        max_time=max_time,
-        val_check_interval=200,
+        max_steps=cfg.training.max_steps,
+        max_time=cfg.training.max_time,
+        val_check_interval=0.1,
         log_every_n_steps=cfg.training.log_every_n_steps,
-        # check_val_every_n_epoch=1,
-        # limit_val_batches=0.1
     )
 
     ############# save params ##############
@@ -95,7 +91,11 @@ def main():
         params_path.write_text(yaml.dump(dict(cfg)))
 
     ############# run training ##############
-    trainer.fit(lightning_model, train_loader, valid_loader)
+    ckpt_path = cfg.get('ckpt_path', None)
+    if ckpt_path is not None:
+        trainer.fit(lightning_model, train_loader, valid_loader, ckpt_path=ckpt_path)
+    else:
+        trainer.fit(lightning_model, train_loader, valid_loader)
 
     ############# run testing ##############
     rank_zero_info('Testing')
