@@ -70,14 +70,14 @@ class RotateLat:
 
 
 def obtain_errors(results, tag: str):
-    # multiply by 10 because I reduced the multiplier in load_datasets
-    target = 10*torch.cat([x[1]['stiffness'] for x in results]) # [num_graphs, 6, 6]
-    prediction = 10*torch.cat([x[0]['stiffness'] for x in results]) # [num_graphs, 6, 6]
+    target = torch.cat([x[1]['stiffness'] for x in results]) # [num_graphs, 6, 6]
+    prediction = torch.cat([x[0]['stiffness'] for x in results]) # [num_graphs, 6, 6]
     names = np.concatenate([x[1]['name'] for x in results])
     rel_dens = torch.cat([x[1]['rel_dens'] for x in results]).numpy()
     directions = torch.randn(250, 3)
     directions = directions / directions.norm(dim=1, keepdim=True)
-    mse_loss = torch.nn.functional.mse_loss(prediction, target, reduction='none').mean(dim=(1,2)).numpy()
+    mse_loss = np.sqrt(torch.nn.functional.mse_loss(prediction, target, reduction='none').sum(dim=(1,2)).numpy())
+    frobenius = np.sqrt(target.pow(2).sum(dim=(1,2)).numpy())
     loss = torch.nn.functional.l1_loss(prediction, target, reduction='none').mean(dim=(1,2)).numpy()
     target_4 = elasticity_func.stiffness_Mandel_to_cart_4(target)
     prediction_4 = elasticity_func.stiffness_Mandel_to_cart_4(prediction)
@@ -91,13 +91,14 @@ def obtain_errors(results, tag: str):
         predicted_eig = [x for x in torch.linalg.eigvalsh(prediction).numpy()]
     except:
         predicted_eig = np.nan
-    return pd.DataFrame({'name':names, 'rel_dens':rel_dens, 'mean_stiffness':mean_stiffness, 'loss':loss, 'mseloss':mse_loss, 'dir_loss':dir_loss, 'tag':tag, 'target_eig':target_eig, 'predicted_eig':predicted_eig})
+    return pd.DataFrame({'name':names, 'rel_dens':rel_dens, 'mean_stiffness':mean_stiffness, 'loss':loss, 'mseloss':mse_loss, 'frobenius':frobenius, 'dir_loss':dir_loss, 'tag':tag, 'target_eig':target_eig, 'predicted_eig':predicted_eig})
 
 def aggr_errors(df_errors):
     params = {}
     if df_errors['loss'].isna().sum() > 0:
         return params
     df_errors['rel_loss'] = df_errors['loss'] / df_errors['mean_stiffness']
+    df_errors['rel_fro'] = df_errors['mseloss'] / df_errors['frobenius']
     df_errors['mse_rel_loss'] = df_errors['mseloss'].map(np.sqrt) / df_errors['mean_stiffness']
     df_errors['rel_dir_loss'] = df_errors['dir_loss'] / df_errors['mean_stiffness']
     df_errors['min_pred_eig'] = df_errors['predicted_eig'].map(np.min)
@@ -108,7 +109,7 @@ def aggr_errors(df_errors):
     df_errors['eig_loss'] = np.abs(predicted_volumes - target_volumes)
     df_errors['rel_eig_loss'] = df_errors['eig_loss'] / target_volumes
 
-    means = df_errors[['tag','loss','rel_loss','mseloss','mse_rel_loss','dir_loss','rel_dir_loss','eig_loss','rel_eig_loss']].groupby(['tag']).mean()
+    means = df_errors[['tag','loss','rel_loss','rel_fro','mseloss','mse_rel_loss','dir_loss','rel_dir_loss','eig_loss','rel_eig_loss']].groupby(['tag']).mean()
     for tag in means.index:
         for col in means.columns:
             params[f'{col}_{tag}'] = means.loc[tag, col]
