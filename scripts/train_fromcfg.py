@@ -38,8 +38,9 @@ def main():
     assert log_dir.is_dir()
 
     ############# setup data ##############
-    train_dset = load_datasets(parent=cfg.data.train_dset_parent, tag='train', reldens_norm=False)
-    valid_dset = load_datasets(parent=cfg.data.val_dset_parent, tag='valid', reldens_norm=False)
+    reldens_norm = cfg.training.get('reldens_norm', False)
+    train_dset = load_datasets(parent=cfg.data.train_dset_parent, tag='train', reldens_norm=reldens_norm)
+    valid_dset = load_datasets(parent=cfg.data.val_dset_parent, tag='valid', reldens_norm=reldens_norm)
 
     # randomize the order of the dataset into loader
     train_loader = DataLoader(
@@ -103,7 +104,7 @@ def main():
         dataset=valid_dset, batch_size=cfg.training.valid_batch_size,
         shuffle=False,
     )
-    # test_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=False)
+    # test_dset = load_datasets(parent=cfg.data.dset_parent, tag='test', reldens_norm=reldens_norm)
     # test_loader = DataLoader(
         # dataset=test_dset, batch_size=cfg.training.valid_batch_size, 
         # shuffle=False, 
