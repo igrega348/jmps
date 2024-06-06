@@ -150,7 +150,7 @@ def load_datasets(tag: str, parent: str = '../../datasets', reldens_norm: bool =
 
     # scaling and normalization
     if reldens_norm:
-        normalization_factor = 10 / dset.data.rel_dens.view(-1,1,1,1,1)
+        normalization_factor = 1 / dset.data.rel_dens.view(-1,1,1)
     else:
         normalization_factor = 300 # we're targeting relative densities on the order of 0.03
 
