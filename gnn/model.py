@@ -132,8 +132,6 @@ class PositiveLiteGNN(torch.nn.Module):
         self.stiffness_head = GNN_Head(params)
         # another head can be added to do compliance prediction
         # self.compliance_head = GNN_Head(params) 
-     
-
 
     def forward(self, batch: Batch) -> Dict:
         
