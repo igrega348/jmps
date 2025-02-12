@@ -6,6 +6,7 @@ from typing import Callable, List, Optional, Union, Iterable, Tuple
 from random import shuffle
 import logging
 from multiprocessing import Pool
+from functools import cached_property
 
 import numpy as np
 import numpy.typing as npt
@@ -65,16 +66,24 @@ def test_calculate_transform_matrix():
     assert np.allclose(Q_torch.numpy(), Q_np), f'Q_torch {Q_torch} not close to Q_np {Q_np}'
 
 class LatticeGraph(Data):
+    rotate_matrix: Optional[torch.Tensor] = None
+
     def __init__(self,*args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    @property
+    @property # can I used cached_property for these?
     def transform_matrix(self) -> torch.Tensor:
-        return calculate_transform_matrix(self.lattice_constants)
+        Q = calculate_transform_matrix(self.lattice_constants)
+        if self.rotate_matrix is not None:
+            Q = torch.einsum('...ai,...ij->...aj', self.rotate_matrix, Q)
+        return Q
 
     @property
     def pos(self) -> torch.Tensor:
         Q = calculate_transform_matrix(self.lattice_constants)
+        if self.rotate_matrix is not None:
+            Q = torch.einsum('...ai,...ij->...aj', self.rotate_matrix, Q)
+
         if hasattr(self, 'batch') and self.batch is not None:
             Q = torch.take_along_dim(Q, self.batch.view(-1,1,1), 0)
             # Q[p,i,j] and red_pos[p,j] -> pos[p,i]
@@ -83,6 +92,9 @@ class LatticeGraph(Data):
     @property
     def transformed_edge_shifts(self) -> torch.Tensor:
         Q = calculate_transform_matrix(self.lattice_constants)
+        if self.rotate_matrix is not None:
+            Q = torch.einsum('...ai,...ij->...aj', self.rotate_matrix, Q)
+
         edge_index = self.edge_index
         sender, _ = edge_index
 
@@ -99,6 +111,37 @@ class LatticeGraph(Data):
 
         shifts[nonzero_mask] = torch.einsum('...ij,...j->...i', Q, self.unit_shifts[nonzero_mask])
         return shifts
+    
+    @property
+    def stiffness_r(self) -> torch.Tensor:
+        if self.rotate_matrix is None:
+            return self.stiffness
+        else:
+            # this could be batched or not
+            R = elasticity_func.Mandel_rot_matrix_torch(self.rotate_matrix)
+            # rotate_matrix 
+            return torch.einsum('...ai,...ij,...bj->...ab', R, self.stiffness, R)
+        
+    @property
+    def compliance_r(self) -> torch.Tensor:
+        if self.rotate_matrix is None:
+            return self.compliance
+        else:
+            R = elasticity_func.Mandel_rot_matrix_torch(self.rotate_matrix)
+            return torch.einsum('...ai,...ij,...bj->...ab', R, self.compliance, R)
+    
+    @property
+    def lattice_constant_per_edge(self) -> torch.Tensor:
+        """Return 3 lattice constant for each edge in the graph."""
+        edge_index = self.edge_index
+        sender, _ = edge_index
+        if hasattr(self, 'batch') and self.batch is not None:
+            batch = self.batch
+            batch_map = batch[sender]
+            lat_const = self.lattice_constants[batch_map, :3]
+        else:
+            lat_const = self.lattice_constants[:3]
+        return lat_const
 
 class GLAMM_Dataset(InMemoryDataset):
     r"""Lattice dataset.

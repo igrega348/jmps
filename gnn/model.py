@@ -90,13 +90,10 @@ class GNN_Head(torch.nn.Module):
         self.positive_layer = PositiveLayer(params)
 
     def forward(self, edge_index: Tensor, node_ft: Tensor, edge_sh: Tensor, edge_feats: Tensor, batch_idx: Tensor, num_graphs: int) -> Tensor:
-
         node_ft = self.layers[0](node_ft, edge_index, edge_sh, edge_feats)
         for i in range(1, self.num_interactions):
             node_ft = node_ft + self.layers[i](node_ft, edge_index, edge_sh, edge_feats)
-       
         output = self.nonlin_readout(node_ft)
-
         graph_ft = scatter(
             src=output,
             index=batch_idx,
@@ -104,7 +101,6 @@ class GNN_Head(torch.nn.Module):
             dim_size=num_graphs,
             reduce=self.global_reduction
         )
-
         stiff_ft = self.linear(graph_ft)
         stiff = self.sph_to_cart(stiff_ft)
         C = self.cart_to_Mandel(stiff)
@@ -113,15 +109,20 @@ class GNN_Head(torch.nn.Module):
 
 
 class PositiveLiteGNN(torch.nn.Module):
-    def __init__(self, params: Namespace, *args: Any, **kwargs: Any) -> "PositiveLiteGNN":
+    def __init__(self, cfg: "CfgDict", *args: Any, **kwargs: Any) -> "PositiveLiteGNN":
         super().__init__(*args, **kwargs)
 
+        params = cfg.model
         self.params = params
         hidden_irreps = o3.Irreps(params.hidden_irreps)
 
         self.node_ft_embedding = torch.nn.Linear(in_features=1, out_features=hidden_irreps.count(o3.Irrep(0,1)))
         self.number_of_edge_basis = params.num_edge_bases
-        self.max_edge_radius = params.max_edge_radius
+        self.max_edge_L_a = params.max_edge_L_a
+        if params.get('max_edge_r_a', None) is not None:
+            self.max_edge_r_a = params.max_edge_r_a
+        elif params.get('max_edge_r_L', None) is not None:
+            self.max_edge_r_L = params.max_edge_r_L
         edge_attr_irreps = o3.Irreps.spherical_harmonics(params.lmax)
         self.spherical_harmonics = o3.SphericalHarmonics(
             edge_attr_irreps,
@@ -131,8 +132,6 @@ class PositiveLiteGNN(torch.nn.Module):
         self.stiffness_head = GNN_Head(params)
         # another head can be added to do compliance prediction
         # self.compliance_head = GNN_Head(params) 
-     
-
 
     def forward(self, batch: Batch) -> Dict:
         
@@ -145,18 +144,33 @@ class PositiveLiteGNN(torch.nn.Module):
         vectors, lengths = get_edge_vectors_and_lengths(
             positions=batch.pos, edge_index=edge_index, shifts=shifts
         )
+        # normalization for edge lengths and radii
+        lat_const = batch.lattice_constant_per_edge
+        abc = torch.pow(lat_const.prod(dim=1), 1/3).view(-1,1)
+        if hasattr(self, 'max_edge_r_a'):
+            edge_r_ = edge_radii / abc
+        elif hasattr(self, 'max_edge_r_L'):
+            edge_r_ = edge_radii / lengths
+        edge_L_a = lengths / abc
+
         # manual bidirectional edges
         vectors = torch.cat((vectors, -vectors), dim=0)
-        lengths = torch.cat((lengths, lengths), dim=0)
+        edge_L_a = torch.cat((edge_L_a, edge_L_a), dim=0)
         edge_index = torch.cat((edge_index, torch.flip(edge_index, [0])), dim=1)
-        edge_radii = torch.cat((edge_radii, edge_radii), dim=0)
+        edge_r_ = torch.cat((edge_r_, edge_r_), dim=0)
 
         edge_length_embedding = soft_one_hot_linspace(
-            lengths.squeeze(-1), start=0, end=0.6, number=self.number_of_edge_basis, basis='gaussian', cutoff=False
+            edge_L_a.squeeze(-1), start=0, end=self.max_edge_L_a, number=self.number_of_edge_basis, basis='gaussian', cutoff=False
         )
-        edge_radius_embedding = soft_one_hot_linspace(
-            edge_radii.squeeze(-1), 0, self.max_edge_radius, self.number_of_edge_basis, 'gaussian', False
-        )
+        if hasattr(self, 'max_edge_r_a'):
+            edge_radius_embedding = soft_one_hot_linspace(
+                edge_r_.squeeze(-1), 0, self.max_edge_r_a, self.number_of_edge_basis, 'gaussian', False
+            )
+        elif hasattr(self, 'max_edge_r_L'):
+            edge_radius_embedding = soft_one_hot_linspace(
+                edge_r_.squeeze(-1), 0, self.max_edge_r_L, self.number_of_edge_basis, 'gaussian', False
+            )
+        
         edge_feats = torch.cat(
             (edge_length_embedding, edge_radius_embedding), 
             dim=1
