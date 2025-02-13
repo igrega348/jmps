@@ -1,0 +1,38 @@
+data:
+  train_dset_parent: ../dataset/sample # path to train dataset
+  val_dset_parent: ../dataset/sample # path to valid dataset
+desc: Demo run
+run_name: 0
+log_dir: ./experiments/0
+tags: ['exp-0']
+model:
+  agg_norm_const: 3.0
+  correlation: 3
+  global_reduction: mean
+  hidden_irreps: 32x0e+32x1o+32x2e+32x3o+32x4e
+  inter_MLP_dim: 64
+  inter_MLP_layers: 3
+  interaction_reduction: sum
+  lmax: 4
+  max_edge_L_a: 1.2
+  max_edge_r_a: 0.05
+  message_passes: 2
+  num_edge_bases: 16
+  positive_function: matrix_power_2
+  readout_irreps: 16x0e+16x1o+16x2e+16x3o+16x4e
+training:
+  accumulate_grad_batches: 4
+  amsgrad: true
+  batch_size: 64
+  beta1: 0.9
+  epsilon: 1.0e-08
+  gradient_clip_val: 10.0
+  log_every_n_steps: 5
+  lr: 2.0e-3
+  max_steps: 50000
+  max_time: 00:03:00:00
+  num_workers: 4
+  optimizer: adamw
+  reldens_norm: false
+  valid_batch_size: 64
+  weight_decay: 1.0e-08

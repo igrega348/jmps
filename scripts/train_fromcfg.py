@@ -3,7 +3,7 @@ import os
 import sys
 from pathlib import Path
 par_folder = Path(__file__).absolute().parents[1]
-if str(par_folder) not in sys.path:
+if str(par_folder) not in sys.path: # make sure the gnn packages can be found
     sys.path.insert(0, str(par_folder))
 import yaml
 from pathlib import Path
@@ -22,23 +22,22 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.utilities.rank_zero import rank_zero_info
 # from pytorch_lightning.utilities.seed import seed_everything
 from torch_geometric.loader import DataLoader
+import tyro
 
 from gnn import PositiveLiteGNN
 from gnn.callbacks import PrintTableMetrics
 from train_utils import load_datasets, obtain_errors, aggr_errors, CfgDict, LightningWrappedModel
 # %%
-def main():
-    run_name = os.environ['RUNNAME']
-    log_dir = par_folder/'experiments'/f'{run_name}'
-    rank_zero_info(log_dir)
-    cfg_path = log_dir/f'params-{run_name}.yml'
-    cfg = yaml.safe_load(cfg_path.read_text())   
+def main(cfg_path: Path):
+    cfg = yaml.safe_load(cfg_path.read_text())
     cfg = CfgDict(cfg)
-
-    assert log_dir.is_dir()
+    run_name = cfg.run_name
+    log_dir = Path(cfg.log_dir)
+    rank_zero_info(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     ############# setup data ##############
-    reldens_norm = cfg.training.get('reldens_norm', False)
+    reldens_norm = cfg.training.reldens_norm
     train_dset = load_datasets(parent=cfg.data.train_dset_parent, tag='train', reldens_norm=reldens_norm)
     valid_dset = load_datasets(parent=cfg.data.val_dset_parent, tag='valid', reldens_norm=reldens_norm)
 
@@ -61,23 +60,24 @@ def main():
     lightning_model = LightningWrappedModel(PositiveLiteGNN, cfg)
 
     ############# setup trainer ##############
-    wandb_logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
-                               tags=cfg.tags)
-    wandb_logger.watch(lightning_model, log="all")
+    logger = True
+    # logger = WandbLogger(project="JMPS", entity="ivan-grega", save_dir=cfg.log_dir, 
+    #                            tags=cfg.tags)
+    # logger.watch(lightning_model, log="all")
     
     callbacks = [
         ModelSummary(max_depth=3),
         ModelCheckpoint(filename='{epoch}-{step}-{val_loss:.4f}', every_n_epochs=1, monitor='val_loss', save_top_k=1, save_last=True),
         PrintTableMetrics(['epoch','step','loss','val_loss','lr'], every_n_steps=100*cfg.training.log_every_n_steps),
         LearningRateMonitor(logging_interval='step'),
-        # EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
+        EarlyStopping(monitor='val_loss', patience=50, verbose=True, mode='min', strict=False) 
     ]
     trainer = pl.Trainer(
         accelerator='auto',
         accumulate_grad_batches=cfg.training.accumulate_grad_batches, 
         gradient_clip_val=cfg.training.gradient_clip_val,
         default_root_dir=cfg.log_dir,
-        logger=wandb_logger,
+        logger=logger,
         enable_progress_bar=False,
         callbacks=callbacks,
         max_steps=cfg.training.max_steps,
@@ -118,4 +118,4 @@ def main():
     rank_zero_info(f"Finished at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__=='__main__':
-    main()
+    tyro.cli(main)
